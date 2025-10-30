@@ -49,20 +49,135 @@ td, th {border: 1px solid #dddddd; text-align: center; padding: 12px;}
 
     @Library('sharedlib') _
 
-pipeline {
-    agent any
-    parameters {
-        string(name: 'REPOSITORY_NAME', defaultValue: 'enterprise-paymybill-payments-test')
-    }
+node(env.dse_worker_node) {
 
-    stages {
-        stage('Show Last Deployed Version') {
-            steps {
-                script {
-                    def htmlReport = getLastDeployedVersion(params.REPOSITORY_NAME)
-                    echo "HTML Report:\n${htmlReport}"
+    // Git Variables
+    def gitRepositoryName = params.REPOSITORY_NAME
+
+    // Pipeline Build Environment
+    env.pipelineEnv = 'prod'
+
+    // UDeploy Variables
+    def appUATVersion = params.CHOOSE_VERSION_TO_DEPLOY_UAT
+    def appQAVersion = params.CHOOSE_VERSION_TO_DEPLOY_QA
+
+    // PCF Variables
+    def pcfSpace_QA = params.PCF_SPACE_QA
+    def pcfSpace_UAT = params.PCF_SPACE_UAT
+
+    ansiColor('xterm') {
+        try {
+            timeout(time: 30, unit: 'MINUTES') {
+
+                stage('initialization') {
+                    logStage('initialization') {
+                        validateBuildReplayed()
+                        cleanWs()
+                    }
                 }
+
+                // 🧩 Add this stage here (after initialization)
+                stage('Get Last Deployed Versions') {
+                    steps {
+                        script {
+                            def htmlReport = getLastDeployedVersion(params.REPOSITORY_NAME)
+                            writeFile file: 'lastDeployedVersion.html', text: htmlReport
+                            publishHTML(target: [
+                                allowMissing: false,
+                                alwaysLinkToLastBuild: true,
+                                keepAll: true,
+                                reportDir: '.',
+                                reportFiles: 'lastDeployedVersion.html',
+                                reportName: 'UDeploy Versions'
+                            ])
+                        }
+                    }
+                }
+
+                // Continue your deployment stages
+                parallel(
+                    'udeploy: sync qa on-prem': {
+                        stage('udeploy: sync qa on-prem') {
+                            logStage('udeploy-sync-qa-on-prem') {
+                                if (appQAVersion.equals('NA')) {
+                                    println "INFO: QA on-prem deployment is being skipped as 'NA' was selected."
+                                } else {
+                                    uDeployProdDeployArtifactQA(gitRepositoryName, appQAVersion, pcfSpace_QA)
+                                }
+                            }
+                        }
+                    },
+
+                    'udeploy: sync qa aws': {
+                        stage('udeploy: sync qa aws') {
+                            logStage('udeploy-sync-qa-aws') {
+                                if (appQAVersion.equals('NA')) {
+                                    println "INFO: QA AWS deployment is being skipped as 'NA' was selected."
+                                } else {
+                                    uDeployProdDeployArtifactQAAWS(gitRepositoryName, appQAVersion, pcfSpace_QA)
+                                }
+                            }
+                        }
+                    },
+
+                    'udeploy: sync qa new aws': {
+                        stage('udeploy: sync qa new aws') {
+                            logStage('udeploy-sync-qa-new-aws') {
+                                if (appQAVersion.equals('NA')) {
+                                    println "INFO: QA new AWS deployment is being skipped as 'NA' was selected."
+                                } else {
+                                    uDeployProdDeployArtifactQaAwsNew(gitRepositoryName, appQAVersion, pcfSpace_QA)
+                                }
+                            }
+                        }
+                    }
+                )
+
+                parallel(
+                    'udeploy: sync uat on-prem': {
+                        stage('udeploy: sync uat on-prem') {
+                            logStage('udeploy-sync-uat-on-prem') {
+                                if (appUATVersion.equals('NA')) {
+                                    println "INFO: UAT on-prem deployment is being skipped as 'NA' was selected."
+                                } else {
+                                    uDeployProdDeployArtifactUAT(gitRepositoryName, appUATVersion, pcfSpace_UAT)
+                                }
+                            }
+                        }
+                    },
+
+                    'udeploy: sync uat aws': {
+                        stage('udeploy: sync uat aws') {
+                            logStage('udeploy-sync-uat-aws') {
+                                if (appUATVersion.equals('NA')) {
+                                    println "INFO: UAT AWS deployment is being skipped as 'NA' was selected."
+                                } else {
+                                    uDeployProdDeployArtifactUATAWS(gitRepositoryName, appUATVersion, pcfSpace_UAT)
+                                }
+                            }
+                        }
+                    },
+
+                    'udeploy: sync uat new aws': {
+                        stage('udeploy: sync uat new aws') {
+                            logStage('udeploy-sync-uat-new-aws') {
+                                if (appUATVersion.equals('NA')) {
+                                    println "INFO: UAT new AWS deployment is being skipped as 'NA' was selected."
+                                } else {
+                                    uDeployProdDeployArtifactUatAwsNew(gitRepositoryName, appUATVersion, pcfSpace_UAT)
+                                }
+                            }
+                        }
+                    }
+                )
             }
+        } catch (err) {
+            handleBuildFailure(err)
+        } finally {
+            if (currentBuild.result == 'FAILURE') {
+                handleFailure()
+            }
+            sendTeamsNotification()
         }
     }
 }
