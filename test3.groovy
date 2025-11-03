@@ -302,3 +302,62 @@ Create more shared library functions
 Share this library across multiple jobs
 
 Remember: Every change in vars/getUDeployVersions.groovy = No approval needed! 🎉
+
+-------------------------------------------------------------------------------------------
+
+
+
+    jenkins file
+
+node(env.dse_worker_node) {
+    
+    //Git Variables
+    def gitRepositoryName = params.REPOSITORY_NAME
+    
+    //Pipeline Build Environment
+    env.pipelineEnv = 'prod'
+    
+    //UDeploy Variables
+    def appUATVersion = params.CHOOSE_VERSION_TO_DEPLOY_UAT
+    def appQAVersion = params.CHOOSE_VERSION_TO_DEPLOY_QA
+    
+    //PCF Variables
+    def pcfSpace_QA = params.PCF_SPACE_QA
+    def pcfSpace_UAT = params.PCF_SPACE_UAT
+    
+    ansiColor('xterm'){
+        try{
+            timeout(time: 30, unit: 'MINUTES') {
+                
+                stage('Initialization') {
+                    logStage('initialization'){
+                        //validateBuildReplayed()
+                    }
+                }
+                
+                cleanWs()
+                
+                stage('Get Last Deployed Versions') {
+                    logStage('Get-Last-Deployed-Versions'){
+                        withCredentials([usernamePassword(
+                            credentialsId: 'UDEPLOY_PROD_CREDENTIALS', 
+                            usernameVariable: 'UDEPLOY_USER', 
+                            passwordVariable: 'UDEPLOY_PASS'
+                        )]) {
+                            def versionTable = getLastDeployedVersion(
+                                UDEPLOY_USER, 
+                                UDEPLOY_PASS, 
+                                REPOSITORY_NAME
+                            )
+                            
+                            // Display the HTML table
+                            echo "=== Last Deployed Versions ==="
+                            echo versionTable
+                            
+                            // Save as artifact
+                            writeFile file: 'deployed-versions.html', text: versionTable
+                            archiveArtifacts artifacts: 'deployed-versions.html'
+                        }
+                    }
+                }
+
