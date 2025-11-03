@@ -360,4 +360,46 @@ node(env.dse_worker_node) {
                         }
                     }
                 }
+------------------------------
 
+    3/11 using sh approch
+
+                def fetchVersion(String username, String password, String repositoryName, String environment) {
+    
+    try {
+        def curlCommand = """
+            curl -ku ${username}:${password} \
+            "https://udeploy.app.syfbank.com:8443/cli/component/getProperty?component=Ecom-API_${repositoryName}&name=last-deployed-${environment}-version"
+        """.trim()
+        
+        // Use Jenkins sh step instead of execute()
+        def responseText = sh(
+            script: curlCommand,
+            returnStdout: true
+        ).trim()
+        
+        if (responseText.contains('Property not found')) {
+            return 'NA'
+        } else if (responseText.isEmpty()) {
+            return 'EMPTY'
+        } else if (responseText.contains('error') || responseText.contains('Error')) {
+            return 'ERROR'
+        }
+        
+        return responseText
+        
+    } catch (Exception e) {
+        return "ERROR: ${e.message}"
+    }
+}
+```
+
+### Option 2: Approve the Script Signature
+
+If you want to keep using `execute()`, you need admin approval:
+
+1. Go to **Jenkins → Manage Jenkins → In-process Script Approval**
+2. Find and approve:
+```
+   staticMethod org.codehaus.groovy.runtime.ProcessGroovyMethods waitForOrKill java.lang.Process long
+                
