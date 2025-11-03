@@ -402,4 +402,116 @@ If you want to keep using `execute()`, you need admin approval:
 2. Find and approve:
 ```
    staticMethod org.codehaus.groovy.runtime.ProcessGroovyMethods waitForOrKill java.lang.Process long
+       -----------------------------------------
+
+
+       html report updated
+
+                def generateHtmlTable(Map versions) {
+    
+    return """
+<html>
+<head>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        table {
+            font-family: Arial, sans-serif;
+            border-collapse: collapse;
+            width: 70%;
+            margin: 20px auto;
+            background-color: white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        td, th {
+            border: 2px solid #333333;
+            text-align: center;
+            padding: 14px;
+            font-size: 14px;
+        }
+        th {
+            background-color: #4CAF50;
+            color: white;
+            font-weight: bold;
+            font-size: 16px;
+            text-transform: uppercase;
+        }
+        tr:nth-child(even) {
+            background-color: #f2f2f2;
+        }
+        tr:hover {
+            background-color: #e8f5e9;
+        }
+        td:first-child {
+            font-weight: bold;
+            background-color: #e3f2fd;
+        }
+        td:nth-child(3) {
+            font-weight: bold;
+            background-color: #fff3e0;
+        }
+        h2 {
+            text-align: center;
+            color: #333;
+            font-family: Arial, sans-serif;
+        }
+    </style>
+</head>
+<body>
+    <h2>Last Deployed Versions - QA & UAT Environments</h2>
+    <table>
+        <tr>
+            <th colspan='2'>QA Environment</th>
+            <th colspan='2'>UAT Environment</th>
+        </tr>
+        <tr>
+            <td>qa2-dal</td>
+            <td>${versions['qa2dal']}</td>
+            <td>uat2-dal</td>
+            <td>${versions['uat2dal']}</td>
+        </tr>
+        <tr>
+            <td>qa3-dal</td>
+            <td>${versions['qa3dal']}</td>
+            <td>uat3-dal</td>
+            <td>${versions['uat3dal']}</td>
+        </tr>
+        <tr>
+            <td>qa2-phx</td>
+            <td>${versions['qa2phx']}</td>
+            <td>uat2-phx</td>
+            <td>${versions['uat2phx']}</td>
+        </tr>
+        <tr>
+            <td>qa-east1</td>
+            <td>${versions['qa-east1']}</td>
+            <td>uat-east1</td>
+            <td>${versions['uat-east1']}</td>
+        </tr>
+        <tr>
+            <td>qa-west2</td>
+            <td>${versions['qa-west2']}</td>
+            <td>uat-west2</td>
+            <td>${versions['uat-west2']}</td>
+        </tr>
+        <tr>
+            <td>qa1-east1</td>
+            <td>${versions['qa1-east1']}</td>
+            <td>uat1-east1</td>
+            <td>${versions['uat1-east1']}</td>
+        </tr>
+        <tr>
+            <td>qa1-east2</td>
+            <td>${versions['qa1-east2']}</td>
+            <td>uat1-east2</td>
+            <td>${versions['uat1-east2']}</td>
+        </tr>
+    </table>
+</body>
+</html>
+"""
+}
                 
