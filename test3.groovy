@@ -821,3 +821,8 @@ def fetchVersion(String username, String password, String repositoryName, String
         return "ERROR: ${e.message}"
     }
 }
+----------------------------------------
+
+    sh """
+    echo '<!-- HTML Content -->' >> deployed-versions.html
+"""
