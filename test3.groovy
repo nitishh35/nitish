@@ -514,4 +514,84 @@ If you want to keep using `execute()`, you need admin approval:
 </html>
 """
 }
-                
+
+
+                -----------------------------------
+
+                    new code
+                def call(String username, String password, String repositoryName) {
+    
+    if (!username || !password || !repositoryName) {
+        return "<html><head><style>body {font-family: arial, sans-serif; padding: 20px;} .error {background-color: #ffebee; border-left: 4px solid #f44336; padding: 15px; color: #d32f2f;}</style></head><body><div class='error'><h3>Error</h3><p>Missing required parameters</p></div></body></html>"
+    }
+    
+    try {
+        def versions = fetchAllVersions(username, password, repositoryName)
+        
+        def qa2DalVersion = versions['qa2dal']
+        def qa3DalVersion = versions['qa3dal']
+        def qa2PhxVersion = versions['qa2phx']
+        def qaEast1Version = versions['qa-east1']
+        def qaWest2Version = versions['qa-west2']
+        def qa1East1Version = versions['qa1-east1']
+        def qa1East2Version = versions['qa1-east2']
+        
+        def uat2DalVersion = versions['uat2dal']
+        def uat3DalVersion = versions['uat3dal']
+        def uat2PhxVersion = versions['uat2phx']
+        def uatEast1Version = versions['uat-east1']
+        def uatWest2Version = versions['uat-west2']
+        def uat1East1Version = versions['uat1-east1']
+        def uat1East2Version = versions['uat1-east2']
+        
+        return "<html><head><style>table {font-family: arial, sans-serif; border-collapse: collapse; width: 50%;}td, th {border: 1px solid #dddddd; text-align: center; padding: 12px;}</style></head><body><table><tr><th colspan='2'>QA</th><th colspan='2'>UAT</th></tr><tr><td>qa2-dal</td><td>$qa2DalVersion</td><td>uat2-dal</td><td>$uat2DalVersion</td></tr><tr><td>qa3-dal</td><td>$qa3DalVersion</td><td>uat3-dal</td><td>$uat3DalVersion</td></tr><tr><td>qa2-phx</td><td>$qa2PhxVersion</td><td>uat2-phx</td><td>$uat2PhxVersion</td></tr><tr><td>qa-east1</td><td>$qaEast1Version</td><td>uat-east1</td><td>$uatEast1Version</td></tr><tr><td>qa-west2</td><td>$qaWest2Version</td><td>uat-west2</td><td>$uatWest2Version</td></tr><tr><td>qa1-east1</td><td>$qa1East1Version</td><td>uat1-east1</td><td>$uat1East1Version</td></tr><tr><td>qa1-east2</td><td>$qa1East2Version</td><td>uat1-east2</td><td>$uat1East2Version</td></tr></table></body></html>"
+        
+    } catch (Exception e) {
+        return "<html><head><style>body {font-family: arial, sans-serif; padding: 20px;} .error {background-color: #ffebee; border-left: 4px solid #f44336; padding: 15px; color: #d32f2f;}</style></head><body><div class='error'><h3>Error</h3><p>Error: ${e.message}</p></div></body></html>"
+    }
+}
+
+def fetchAllVersions(String username, String password, String repositoryName) {
+    
+    def versions = [:]
+    
+    def environments = [
+        'qa2dal', 'qa3dal', 'qa2phx', 'qa-east1', 'qa-west2', 'qa1-east1', 'qa1-east2',
+        'uat2dal', 'uat3dal', 'uat2phx', 'uat-east1', 'uat-west2', 'uat1-east1', 'uat1-east2'
+    ]
+    
+    environments.each { env ->
+        versions[env] = fetchVersion(username, password, repositoryName, env)
+    }
+    
+    return versions
+}
+
+def fetchVersion(String username, String password, String repositoryName, String environment) {
+    
+    try {
+        def curlCommand = """
+            curl -ku ${username}:${password} \
+            "https://udeploy.app.syfbank.com:8443/cli/component/getProperty?component=Ecom-API_${repositoryName}&name=last-deployed-${environment}-version"
+        """.trim()
+        
+        // Use Jenkins sh step instead of execute()
+        def responseText = sh(
+            script: curlCommand,
+            returnStdout: true
+        ).trim()
+        
+        if (responseText.contains('Property not found')) {
+            return 'NA'
+        } else if (responseText.isEmpty()) {
+            return 'EMPTY'
+        } else if (responseText.contains('error') || responseText.contains('Error')) {
+            return 'ERROR'
+        }
+        
+        return responseText
+        
+    } catch (Exception e) {
+        return "ERROR: ${e.message}"
+    }
+}
