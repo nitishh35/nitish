@@ -826,3 +826,14 @@ def fetchVersion(String username, String password, String repositoryName, String
     sh """
     echo '<!-- HTML Content -->' >> deployed-versions.html
 """
+-----------------------------------------
+
+    publishHTML([
+                allowMissing: false,
+                alwaysLinkToLastBuild: true,
+                keepAll: true,
+                reportDir: '.',
+                reportFiles: 'deployed-versions.html',
+                reportName: 'Deployment Versions',
+                reportTitles: 'Last Deployed Versions'
+            ])
