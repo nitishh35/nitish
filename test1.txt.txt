@@ -1,49 +1,17 @@
-Here’s a concise and professional **Confluence page draft** for your implementation 👇
+// NOTE: No @Library annotation — we use the Jenkins shared lib namespace directly.
+def repoName = REPOSITORY_NAME ?: "enterprise-paymybill-payment-methods-sync-up-testing"
 
----
+// Load the shared library function
+def lib = org.jenkinsci.plugins.workflow.cps.GlobalVariable.getBinding().getVariable("getDeployedLastVersion")
 
-## 🏷️ **Bitbucket Tag Protection – Pipeline Version Control Alignment**
+// Call the shared lib method
+return lib.call(repoName)
 
-### **Background**
 
-In our current setup, source code version tags are created automatically through Jenkins pipelines. These tags determine subsequent versions and maintain alignment between **UDeploy deployments** and the **codebase versioning**.
-However, some tags were being **manually deleted by users**, causing versioning conflicts.
 
----
 
-### **Problem**
+second approach
 
-* Users with write access could delete Git tags.
-* Tag deletion led to mismatched versions between **Bitbucket**, **UDeploy**, and **deployment artifacts**.
 
----
-
-### **Solution Implemented**
-
-Tag deletion protection has been configured at the **Bitbucket project level** to restrict non-admin users from deleting tags.
-
-**Key actions:**
-
-* Applied **branch and tag deletion restrictions** under *Project Settings → Repository Settings → Permissions*.
-* Only **Project Administrators** can delete tags.
-* Jenkins pipeline scripts continue to manage tag creation automatically.
-* Validation added in pipeline to check for existing tags before creating new ones.
-
----
-
-### **Outcome**
-
-* Ensures consistent versioning between **Bitbucket**, **UDeploy**, and the deployment pipeline.
-* Prevents accidental or unauthorized tag deletions.
-* Simplifies audit and rollback processes.
-
----
-
-### **Next Steps**
-
-* Communicate new tag policy to development teams.
-* Periodically audit tag operations via Bitbucket logs.
-
----
-
-Would you like me to make it a **Confluence-ready version with formatting (headings, panels, and code snippets)** so you can copy-paste directly into your page?
+// Safe sandboxed wrapper
+return getDeployedLastVersion(REPOSITORY_NAME ?: "enterprise-paymybill-payment-methods-sync-up-testing")
