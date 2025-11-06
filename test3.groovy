@@ -1,839 +1,107 @@
-Complete Solution with All Code
-📂 Step 1: Create Shared Library Repository
-1.1 Create the repository structure:
-bashmkdir my-jenkins-shared-library
-cd my-jenkins-shared-library
-mkdir vars
-1.2 Create the file: vars/getUDeployVersions.groovy
-Copy this EXACT code into the file:
-groovy// vars/getUDeployVersions.groovy
+//Show the last deployed version from udeploy properties for individual foundation
 
-def call(String username, String password, String repositoryName) {
-    
-    if (!username || !password || !repositoryName) {
-        return generateErrorHtml("Missing required parameters")
-    }
-    
-    try {
-        def versions = fetchAllVersions(username, password, repositoryName)
-        return generateHtmlTable(versions)
-    } catch (Exception e) {
-        return generateErrorHtml("Error: ${e.message}")
-    }
+//Referenced parameters: REPOSITORY_NAME
+
+//Parameter Name: LAST_DEPLOYED_VERSION
+
+//Job Type: UAT/sync-up job
+
+//DSE - LAST_DEPLOYED_VERSION - promote to UAT and sync QA/UAT job
+
+import jenkins.*
+
+import jenkins.model.*
+
+import hudson.*
+
+import hudson.model.*
+
+import groovy.json.JsonSlurper
+
+def jenkinsCredentials = com.cloudbees.plugins.c .cloudbees.plugins.credentials. CredentialsProvider.lookupCredentia
+
+com.cloudbees.plugins.credentials. Credentials.class,
+
+Jenkins.instance,
+
+null,
+
+null
+);
+
+for(creds in jenkins Credentials){
+
+if(creds.id == "UDEPLOY_PROD_CREDENTIALS"){
+
+response ("curl -ku $creds.username:$creds.password https://udeploy.app.syfbank.com:8443/cli/component/getProperty? component-Ecom-API_${REPOSITORY_NAME}&name-last-deployed-qa2dal-version").execute()
+
+responseText = response.text
+
+qa2DalVersion responseText.contains ('Property not found') ? 'NA': responseText
+
+
+response = ("curl -ku $creds.username:$creds.password https://udeploy.app.syfbank.com:8443/cli/component/getProperty?
+
+component-Ecom-API_${REPOSITORY_NAME}&name=last-deployed-qa2phx-version").execute()
+
+responseText = response.text
+
+qa2PhxVersion = responseText.contains('Property not found') ? 'NA': responseText
+
+
+response ("curl -ku $creds.username:$creds.password https://udeploy.app.syfbank.com:8443/cli/component/getProperty? component-Ecom-API_${REPOSITORY_NAME}&name=last-deployed-qa1-east1-version").execute()
+
+responseText response.text
+
+qalEast1Version responseText.contains('Property not found')? 'NA': responseText
+
+
+response ("curl -ku $creds.username:$creds.password https://udeploy.app.syfbank.com:8443/cli/component/getProperty? component-Ecom-API_${REPOSITORY_NAME}&name-last-deployed-qa1-east2-version").execute()
+
+responseText response.text
+
+qa1East2Version responseText.contains('Property not found') ? 'NA': responseText
+
+
+response ("curl -ku $creds.username: $creds.password https://udeploy.app.syfbank.com:8443/cli/component/getProperty? component-Ecom-API_${REPOSITORY_NAME}&name-last-deployed-uat2dal-version").execute()
+
+responseText = response.text
+
+uat2DalVersion = responseText.contains('Property not found') ? 'NA': responseText.
+
+
+response = ("curl -ku $creds.username:$creds.password https://udeploy.app.syfbank.com:8443/cli/component/getProperty? component-Ecom-API_${REPOSITORY_NAME}&name=last-deployed-uat2phx-version").execute()
+
+responseText = response.text
+
+uat2PhxVersion = responseText.contains('Property not found') ? 'NA': responseText
+
+
+response ("curl -ku $creds.username:$creds.password https://udeploy.app.syfbank.com:8443/c11/component/getProperty? component-Ecom-API_${REPOSITORY_NAME}&name-last-deployed-uat1-east1-version").execute()
+
+responseText response.text
+
+uat1East1Version responseText.contains('Property not found')? 'NA': responseText
+
+
+response ("curl -ku $creds.username:$creds.password https://udeploy.app.syfbank.com:8443/cli/component/getProperty? component-Ecom-API_${REPOSITORY_NAME}&name-last-deployed-uat1-east2-version").execute()
+
+responseText response.text
+
+uat1East2Version responseText.contains('Property not found')? 'NA' responseText
+
+
+return "<html><head><style>table {font-family: arial, sans-serif; border-collapse: collapse; width: 50%;}td, th {border: 1px solid #dddddd; text-align: center; padding: 12px;}</style></head><body><table><tr><th colspan='2'>
+
+QA</th><th colspan='2'>JAT</th> </tr><tr><td>qa2-dal</td><td>$qa2DalVersion</td><td>uat2-dal</td><td> Suat2DalVersion</td></tr>
+
+<tr><td>qa2-phx</td><td>$qa2PhxVersion</td><td>uat2-phx</td><td>$uat2PhxVersion</td></tr>
+
+<tr><td>qal-east1</td><td>$qa1East1Version</td><td>uat1-east1</td><td>
+
+Suat1East1Version</td></tr><tr><td>qa1-east2</td><td>$qa1East2Version</td><td>uat1-east2</td><td>$uat1East2Version</td>
+
+</tr></table></body></html>"
+
 }
-
-def fetchAllVersions(String username, String password, String repositoryName) {
-    
-    def versions = [:]
-    
-    def environments = [
-        'qa2dal', 'qa3dal', 'qa2phx', 'qa-east1', 'qa-west2', 'qa1-east1', 'qa1-east2',
-        'uat2dal', 'uat3dal', 'uat2phx', 'uat-east1', 'uat-west2', 'uat1-east1', 'uat1-east2'
-    ]
-    
-    environments.each { env ->
-        versions[env] = fetchVersion(username, password, repositoryName, env)
-    }
-    
-    return versions
 }
-
-def fetchVersion(String username, String password, String repositoryName, String environment) {
-    
-    try {
-        def cmd = "curl -ku ${username}:${password} " +
-                  "https://udeploy.app.syfbank.com:8443/cli/component/getProperty?" +
-                  "component=Ecom-API_${repositoryName}&name=last-deployed-${environment}-version"
-        
-        def process = cmd.execute()
-        process.waitForOrKill(30000)
-        
-        def responseText = process.text.trim()
-        
-        if (responseText.contains('Property not found')) {
-            return 'NA'
-        } else if (responseText.isEmpty()) {
-            return 'EMPTY'
-        } else if (responseText.contains('error') || responseText.contains('Error')) {
-            return 'ERROR'
-        }
-        
-        return responseText
-        
-    } catch (Exception e) {
-        return "ERROR: ${e.message}"
-    }
-}
-
-def generateHtmlTable(Map versions) {
-    
-    return """
-<html>
-<head>
-    <style>
-        table {
-            font-family: arial, sans-serif;
-            border-collapse: collapse;
-            width: 50%;
-        }
-        td, th {
-            border: 1px solid #dddddd;
-            text-align: center;
-            padding: 12px;
-        }
-        th {
-            background-color: #4CAF50;
-            color: white;
-        }
-        tr:nth-child(even) {
-            background-color: #f2f2f2;
-        }
-    </style>
-</head>
-<body>
-    <table>
-        <tr>
-            <th colspan='2'>QA</th>
-            <th colspan='2'>UAT</th>
-        </tr>
-        <tr>
-            <td>qa2-dal</td>
-            <td>${versions['qa2dal']}</td>
-            <td>uat2-dal</td>
-            <td>${versions['uat2dal']}</td>
-        </tr>
-        <tr>
-            <td>qa3-dal</td>
-            <td>${versions['qa3dal']}</td>
-            <td>uat3-dal</td>
-            <td>${versions['uat3dal']}</td>
-        </tr>
-        <tr>
-            <td>qa2-phx</td>
-            <td>${versions['qa2phx']}</td>
-            <td>uat2-phx</td>
-            <td>${versions['uat2phx']}</td>
-        </tr>
-        <tr>
-            <td>qa-east1</td>
-            <td>${versions['qa-east1']}</td>
-            <td>uat-east1</td>
-            <td>${versions['uat-east1']}</td>
-        </tr>
-        <tr>
-            <td>qa-west2</td>
-            <td>${versions['qa-west2']}</td>
-            <td>uat-west2</td>
-            <td>${versions['uat-west2']}</td>
-        </tr>
-        <tr>
-            <td>qa1-east1</td>
-            <td>${versions['qa1-east1']}</td>
-            <td>uat1-east1</td>
-            <td>${versions['uat1-east1']}</td>
-        </tr>
-        <tr>
-            <td>qa1-east2</td>
-            <td>${versions['qa1-east2']}</td>
-            <td>uat1-east2</td>
-            <td>${versions['uat1-east2']}</td>
-        </tr>
-    </table>
-</body>
-</html>
-"""
-}
-
-def generateErrorHtml(String errorMessage) {
-    return """
-<html>
-<head>
-    <style>
-        body {
-            font-family: arial, sans-serif;
-            padding: 20px;
-        }
-        .error {
-            background-color: #ffebee;
-            border-left: 4px solid #f44336;
-            padding: 15px;
-            color: #d32f2f;
-        }
-    </style>
-</head>
-<body>
-    <div class="error">
-        <h3>Error</h3>
-        <p>${errorMessage}</p>
-    </div>
-</body>
-</html>
-"""
-}
-1.3 Push to GitHub/GitLab:
-bashgit init
-git add .
-git commit -m "Add UDeploy version checker shared library"
-git remote add origin https://github.com/YOUR_ORG/my-jenkins-shared-library.git
-git push -u origin main
-
-⚙️ Step 2: Configure Jenkins Shared Library
-
-Go to: Manage Jenkins → System → Scroll to Global Pipeline Libraries
-Click Add button
-Fill in these details:
-
-Name: udeploy-library ⚠️ (Remember this name!)
-Default version: main
-Load implicitly: ❌ Unchecked
-Allow default version to be overridden: ✅ Checked
-Include @Library changes in job recent changes: ✅ Checked
-
-
-Under Retrieval method, select: Modern SCM
-Select Git and fill:
-
-Project Repository: https://github.com/YOUR_ORG/my-jenkins-shared-library.git
-Credentials: (Select if private repo, otherwise leave as "none")
-
-
-Click Save
-
-
-🔧 Step 3: Update Jenkins Active Choice Parameter
-Go to your Jenkins job → Configure → Active Choice Parameter
-Replace your ENTIRE script with this:
-groovy@Library('udeploy-library')_
-
-import jenkins.model.Jenkins
-import com.cloudbees.plugins.credentials.CredentialsProvider
-
-def creds = CredentialsProvider.lookupCredentials(
-    com.cloudbees.plugins.credentials.Credentials.class,
-    Jenkins.instance,
-    null,
-    null
-).find { it.id == "UDEPLOY_PROD_CREDENTIALS" }
-
-if (creds) {
-    return getUDeployVersions(
-        creds.username.toString(), 
-        creds.password.toString(), 
-        REPOSITORY_NAME
-    )
-} else {
-    return "<html><body><h3 style='color:red;'>Error: UDEPLOY_PROD_CREDENTIALS not found</h3></body></html>"
-}
-⚠️ IMPORTANT: Make sure 'udeploy-library' matches the name you used in Step 2!
-
-✅ Step 4: Test and Approve
-
-Save your Jenkins job configuration
-Run the job - It will fail with "Script not approved"
-Go to: Manage Jenkins → In-process Script Approval
-You will see pending approvals like:
-
-   method jenkins.model.Jenkins getInstanceOrNull
-   staticMethod jenkins.model.Jenkins getInstance
-   method com.cloudbees.plugins.credentials.CredentialsProvider lookupCredentials
-
-Approve all pending scripts
-Run the job again - It should work now! ✅
-
-
-🎉 Done! Now Test Future Changes
-Make a change WITHOUT needing approval:
-bashcd my-jenkins-shared-library
-
-# Edit vars/getUDeployVersions.groovy
-# Example: Change the table header color from green to blue
-# Find this line: background-color: #4CAF50;
-# Change to: background-color: #2196F3;
-
-git add vars/getUDeployVersions.groovy
-git commit -m "Changed header color to blue"
-git push origin main
-Run your Jenkins job again - The change will be reflected! No approval needed! 🎊
-
-📋 Your Repository Structure Should Look Like:
-my-jenkins-shared-library/
-├── vars/
-│   └── getUDeployVersions.groovy    (The code above)
-└── README.md                         (Optional)
-
-🐛 Troubleshooting
-Error: "No signature of method: getUDeployVersions()"
-Fix: The library name in @Library('udeploy-library') must match what you configured in Jenkins
-Error: "Credentials not found"
-Fix:
-
-Verify UDEPLOY_PROD_CREDENTIALS exists in Jenkins
-Go to: Manage Jenkins → Credentials → Check it's there
-
-Error: "Unable to resolve class"
-Fix:
-
-Make sure file is named exactly: vars/getUDeployVersions.groovy
-File must be in vars/ folder, not root
-
-Changes not reflecting
-Fix:
-
-Wait 1-2 minutes (Jenkins caches libraries)
-Or force refresh: Restart Jenkins
-Check you pushed to the correct branch
-
-
-📊 What You Achieved
-✅ All business logic is now in Git (version controlled)
-✅ Only 15 lines in Jenkins (approved once)
-✅ Future changes = Just git push
-✅ No more waiting for admin approvals
-✅ Can rollback easily with git
-✅ Can test in branches before merging
-
-🚀 Next Steps
-Now you can:
-
-Add more environments to the list
-Change HTML styling
-Add error notifications
-Create more shared library functions
-Share this library across multiple jobs
-
-Remember: Every change in vars/getUDeployVersions.groovy = No approval needed! 🎉
-
--------------------------------------------------------------------------------------------
-
-
-
-    jenkins file
-
-node(env.dse_worker_node) {
-    
-    //Git Variables
-    def gitRepositoryName = params.REPOSITORY_NAME
-    
-    //Pipeline Build Environment
-    env.pipelineEnv = 'prod'
-    
-    //UDeploy Variables
-    def appUATVersion = params.CHOOSE_VERSION_TO_DEPLOY_UAT
-    def appQAVersion = params.CHOOSE_VERSION_TO_DEPLOY_QA
-    
-    //PCF Variables
-    def pcfSpace_QA = params.PCF_SPACE_QA
-    def pcfSpace_UAT = params.PCF_SPACE_UAT
-    
-    ansiColor('xterm'){
-        try{
-            timeout(time: 30, unit: 'MINUTES') {
-                
-                stage('Initialization') {
-                    logStage('initialization'){
-                        //validateBuildReplayed()
-                    }
-                }
-                
-                cleanWs()
-                
-                stage('Get Last Deployed Versions') {
-                    logStage('Get-Last-Deployed-Versions'){
-                        withCredentials([usernamePassword(
-                            credentialsId: 'UDEPLOY_PROD_CREDENTIALS', 
-                            usernameVariable: 'UDEPLOY_USER', 
-                            passwordVariable: 'UDEPLOY_PASS'
-                        )]) {
-                            def versionTable = getLastDeployedVersion(
-                                UDEPLOY_USER, 
-                                UDEPLOY_PASS, 
-                                REPOSITORY_NAME
-                            )
-                            
-                            // Display the HTML table
-                            echo "=== Last Deployed Versions ==="
-                            echo versionTable
-                            
-                            // Save as artifact
-                            writeFile file: 'deployed-versions.html', text: versionTable
-                            archiveArtifacts artifacts: 'deployed-versions.html'
-                        }
-                    }
-                }
-------------------------------
-
-    3/11 using sh approch
-
-                def fetchVersion(String username, String password, String repositoryName, String environment) {
-    
-    try {
-        def curlCommand = """
-            curl -ku ${username}:${password} \
-            "https://udeploy.app.syfbank.com:8443/cli/component/getProperty?component=Ecom-API_${repositoryName}&name=last-deployed-${environment}-version"
-        """.trim()
-        
-        // Use Jenkins sh step instead of execute()
-        def responseText = sh(
-            script: curlCommand,
-            returnStdout: true
-        ).trim()
-        
-        if (responseText.contains('Property not found')) {
-            return 'NA'
-        } else if (responseText.isEmpty()) {
-            return 'EMPTY'
-        } else if (responseText.contains('error') || responseText.contains('Error')) {
-            return 'ERROR'
-        }
-        
-        return responseText
-        
-    } catch (Exception e) {
-        return "ERROR: ${e.message}"
-    }
-}
-```
-
-### Option 2: Approve the Script Signature
-
-If you want to keep using `execute()`, you need admin approval:
-
-1. Go to **Jenkins → Manage Jenkins → In-process Script Approval**
-2. Find and approve:
-```
-   staticMethod org.codehaus.groovy.runtime.ProcessGroovyMethods waitForOrKill java.lang.Process long
-       -----------------------------------------
-
-
-       html report updated
-
-                def generateHtmlTable(Map versions) {
-    
-    return """
-<html>
-<head>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            padding: 20px;
-            background-color: #f5f5f5;
-        }
-        table {
-            font-family: Arial, sans-serif;
-            border-collapse: collapse;
-            width: 70%;
-            margin: 20px auto;
-            background-color: white;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        td, th {
-            border: 2px solid #333333;
-            text-align: center;
-            padding: 14px;
-            font-size: 14px;
-        }
-        th {
-            background-color: #4CAF50;
-            color: white;
-            font-weight: bold;
-            font-size: 16px;
-            text-transform: uppercase;
-        }
-        tr:nth-child(even) {
-            background-color: #f2f2f2;
-        }
-        tr:hover {
-            background-color: #e8f5e9;
-        }
-        td:first-child {
-            font-weight: bold;
-            background-color: #e3f2fd;
-        }
-        td:nth-child(3) {
-            font-weight: bold;
-            background-color: #fff3e0;
-        }
-        h2 {
-            text-align: center;
-            color: #333;
-            font-family: Arial, sans-serif;
-        }
-    </style>
-</head>
-<body>
-    <h2>Last Deployed Versions - QA & UAT Environments</h2>
-    <table>
-        <tr>
-            <th colspan='2'>QA Environment</th>
-            <th colspan='2'>UAT Environment</th>
-        </tr>
-        <tr>
-            <td>qa2-dal</td>
-            <td>${versions['qa2dal']}</td>
-            <td>uat2-dal</td>
-            <td>${versions['uat2dal']}</td>
-        </tr>
-        <tr>
-            <td>qa3-dal</td>
-            <td>${versions['qa3dal']}</td>
-            <td>uat3-dal</td>
-            <td>${versions['uat3dal']}</td>
-        </tr>
-        <tr>
-            <td>qa2-phx</td>
-            <td>${versions['qa2phx']}</td>
-            <td>uat2-phx</td>
-            <td>${versions['uat2phx']}</td>
-        </tr>
-        <tr>
-            <td>qa-east1</td>
-            <td>${versions['qa-east1']}</td>
-            <td>uat-east1</td>
-            <td>${versions['uat-east1']}</td>
-        </tr>
-        <tr>
-            <td>qa-west2</td>
-            <td>${versions['qa-west2']}</td>
-            <td>uat-west2</td>
-            <td>${versions['uat-west2']}</td>
-        </tr>
-        <tr>
-            <td>qa1-east1</td>
-            <td>${versions['qa1-east1']}</td>
-            <td>uat1-east1</td>
-            <td>${versions['uat1-east1']}</td>
-        </tr>
-        <tr>
-            <td>qa1-east2</td>
-            <td>${versions['qa1-east2']}</td>
-            <td>uat1-east2</td>
-            <td>${versions['uat1-east2']}</td>
-        </tr>
-    </table>
-</body>
-</html>
-"""
-}
-
-
-                -----------------------------------
-
-                    new code
-                def call(String username, String password, String repositoryName) {
-    
-    if (!username || !password || !repositoryName) {
-        return "<html><head><style>body {font-family: arial, sans-serif; padding: 20px;} .error {background-color: #ffebee; border-left: 4px solid #f44336; padding: 15px; color: #d32f2f;}</style></head><body><div class='error'><h3>Error</h3><p>Missing required parameters</p></div></body></html>"
-    }
-    
-    try {
-        def versions = fetchAllVersions(username, password, repositoryName)
-        
-        def qa2DalVersion = versions['qa2dal']
-        def qa3DalVersion = versions['qa3dal']
-        def qa2PhxVersion = versions['qa2phx']
-        def qaEast1Version = versions['qa-east1']
-        def qaWest2Version = versions['qa-west2']
-        def qa1East1Version = versions['qa1-east1']
-        def qa1East2Version = versions['qa1-east2']
-        
-        def uat2DalVersion = versions['uat2dal']
-        def uat3DalVersion = versions['uat3dal']
-        def uat2PhxVersion = versions['uat2phx']
-        def uatEast1Version = versions['uat-east1']
-        def uatWest2Version = versions['uat-west2']
-        def uat1East1Version = versions['uat1-east1']
-        def uat1East2Version = versions['uat1-east2']
-        
-        return "<html><head><style>table {font-family: arial, sans-serif; border-collapse: collapse; width: 50%;}td, th {border: 1px solid #dddddd; text-align: center; padding: 12px;}</style></head><body><table><tr><th colspan='2'>QA</th><th colspan='2'>UAT</th></tr><tr><td>qa2-dal</td><td>$qa2DalVersion</td><td>uat2-dal</td><td>$uat2DalVersion</td></tr><tr><td>qa3-dal</td><td>$qa3DalVersion</td><td>uat3-dal</td><td>$uat3DalVersion</td></tr><tr><td>qa2-phx</td><td>$qa2PhxVersion</td><td>uat2-phx</td><td>$uat2PhxVersion</td></tr><tr><td>qa-east1</td><td>$qaEast1Version</td><td>uat-east1</td><td>$uatEast1Version</td></tr><tr><td>qa-west2</td><td>$qaWest2Version</td><td>uat-west2</td><td>$uatWest2Version</td></tr><tr><td>qa1-east1</td><td>$qa1East1Version</td><td>uat1-east1</td><td>$uat1East1Version</td></tr><tr><td>qa1-east2</td><td>$qa1East2Version</td><td>uat1-east2</td><td>$uat1East2Version</td></tr></table></body></html>"
-        
-    } catch (Exception e) {
-        return "<html><head><style>body {font-family: arial, sans-serif; padding: 20px;} .error {background-color: #ffebee; border-left: 4px solid #f44336; padding: 15px; color: #d32f2f;}</style></head><body><div class='error'><h3>Error</h3><p>Error: ${e.message}</p></div></body></html>"
-    }
-}
-
-def fetchAllVersions(String username, String password, String repositoryName) {
-    
-    def versions = [:]
-    
-    def environments = [
-        'qa2dal', 'qa3dal', 'qa2phx', 'qa-east1', 'qa-west2', 'qa1-east1', 'qa1-east2',
-        'uat2dal', 'uat3dal', 'uat2phx', 'uat-east1', 'uat-west2', 'uat1-east1', 'uat1-east2'
-    ]
-    
-    environments.each { env ->
-        versions[env] = fetchVersion(username, password, repositoryName, env)
-    }
-    
-    return versions
-}
-
-def fetchVersion(String username, String password, String repositoryName, String environment) {
-    
-    try {
-        def curlCommand = """
-            curl -ku ${username}:${password} \
-            "https://udeploy.app.syfbank.com:8443/cli/component/getProperty?component=Ecom-API_${repositoryName}&name=last-deployed-${environment}-version"
-        """.trim()
-        
-        // Use Jenkins sh step instead of execute()
-        def responseText = sh(
-            script: curlCommand,
-            returnStdout: true
-        ).trim()
-        
-        if (responseText.contains('Property not found')) {
-            return 'NA'
-        } else if (responseText.isEmpty()) {
-            return 'EMPTY'
-        } else if (responseText.contains('error') || responseText.contains('Error')) {
-            return 'ERROR'
-        }
-        
-        return responseText
-        
-    } catch (Exception e) {
-        return "ERROR: ${e.message}"
-    }
-}
-                -------------------------------------------------------------------------------
-
-                    def call(String username, String password, String repositoryName) {
-    
-    if (!username || !password || !repositoryName) {
-        return """
-<html>
-<head>
-    <style>
-        body {
-            font-family: arial, sans-serif;
-            padding: 20px;
-        }
-        .error {
-            background-color: #ffebee;
-            border-left: 4px solid #f44336;
-            padding: 15px;
-            color: #d32f2f;
-        }
-    </style>
-</head>
-<body>
-    <div class='error'>
-        <h3>Error</h3>
-        <p>Missing required parameters</p>
-    </div>
-</body>
-</html>
-"""
-    }
-    
-    try {
-        def versions = fetchAllVersions(username, password, repositoryName)
-        
-        def qa2DalVersion = versions['qa2dal']
-        def qa3DalVersion = versions['qa3dal']
-        def qa2PhxVersion = versions['qa2phx']
-        def qaEast1Version = versions['qa-east1']
-        def qaWest2Version = versions['qa-west2']
-        def qa1East1Version = versions['qa1-east1']
-        def qa1East2Version = versions['qa1-east2']
-        
-        def uat2DalVersion = versions['uat2dal']
-        def uat3DalVersion = versions['uat3dal']
-        def uat2PhxVersion = versions['uat2phx']
-        def uatEast1Version = versions['uat-east1']
-        def uatWest2Version = versions['uat-west2']
-        def uat1East1Version = versions['uat1-east1']
-        def uat1East2Version = versions['uat1-east2']
-        
-        return """
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <title>Deployment Versions - ${repositoryName}</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            padding: 20px;
-            background-color: #f5f5f5;
-        }
-        h2 {
-            color: #333;
-            text-align: center;
-        }
-        table {
-            font-family: arial, sans-serif;
-            border-collapse: collapse;
-            width: 60%;
-            margin: 20px auto;
-            background-color: white;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        td, th {
-            border: 1px solid #dddddd;
-            text-align: center;
-            padding: 12px;
-        }
-        th {
-            background-color: #4CAF50;
-            color: white;
-            font-weight: bold;
-        }
-        tr:nth-child(even) {
-            background-color: #f9f9f9;
-        }
-        tr:hover {
-            background-color: #f1f1f1;
-        }
-        .env-name {
-            font-weight: bold;
-            background-color: #e8f5e9;
-        }
-    </style>
-</head>
-<body>
-    <h2>Last Deployed Versions - ${repositoryName}</h2>
-    <table>
-        <thead>
-            <tr>
-                <th colspan='2'>QA Environments</th>
-                <th colspan='2'>UAT Environments</th>
-            </tr>
-        </thead>
-        <tbody>
-            <tr>
-                <td class='env-name'>qa2-dal</td>
-                <td>${qa2DalVersion}</td>
-                <td class='env-name'>uat2-dal</td>
-                <td>${uat2DalVersion}</td>
-            </tr>
-            <tr>
-                <td class='env-name'>qa3-dal</td>
-                <td>${qa3DalVersion}</td>
-                <td class='env-name'>uat3-dal</td>
-                <td>${uat3DalVersion}</td>
-            </tr>
-            <tr>
-                <td class='env-name'>qa2-phx</td>
-                <td>${qa2PhxVersion}</td>
-                <td class='env-name'>uat2-phx</td>
-                <td>${uat2PhxVersion}</td>
-            </tr>
-            <tr>
-                <td class='env-name'>qa-east1</td>
-                <td>${qaEast1Version}</td>
-                <td class='env-name'>uat-east1</td>
-                <td>${uatEast1Version}</td>
-            </tr>
-            <tr>
-                <td class='env-name'>qa-west2</td>
-                <td>${qaWest2Version}</td>
-                <td class='env-name'>uat-west2</td>
-                <td>${uatWest2Version}</td>
-            </tr>
-            <tr>
-                <td class='env-name'>qa1-east1</td>
-                <td>${qa1East1Version}</td>
-                <td class='env-name'>uat1-east1</td>
-                <td>${uat1East1Version}</td>
-            </tr>
-            <tr>
-                <td class='env-name'>qa1-east2</td>
-                <td>${qa1East2Version}</td>
-                <td class='env-name'>uat1-east2</td>
-                <td>${uat1East2Version}</td>
-            </tr>
-        </tbody>
-    </table>
-</body>
-</html>
-"""
-        
-    } catch (Exception e) {
-        return """
-<html>
-<head>
-    <style>
-        body {
-            font-family: arial, sans-serif;
-            padding: 20px;
-        }
-        .error {
-            background-color: #ffebee;
-            border-left: 4px solid #f44336;
-            padding: 15px;
-            color: #d32f2f;
-        }
-    </style>
-</head>
-<body>
-    <div class='error'>
-        <h3>Error</h3>
-        <p>Error: ${e.message}</p>
-    </div>
-</body>
-</html>
-"""
-    }
-}
-
-def fetchAllVersions(String username, String password, String repositoryName) {
-    
-    def versions = [:]
-    
-    def environments = [
-        'qa2dal', 'qa3dal', 'qa2phx', 'qa-east1', 'qa-west2', 'qa1-east1', 'qa1-east2',
-        'uat2dal', 'uat3dal', 'uat2phx', 'uat-east1', 'uat-west2', 'uat1-east1', 'uat1-east2'
-    ]
-    
-    environments.each { env ->
-        versions[env] = fetchVersion(username, password, repositoryName, env)
-    }
-    
-    return versions
-}
-
-def fetchVersion(String username, String password, String repositoryName, String environment) {
-    
-    try {
-        def curlCommand = """
-            curl -ku ${username}:${password} \
-            "https://udeploy.app.syfbank.com:8443/cli/component/getProperty?component=Ecom-API_${repositoryName}&name=last-deployed-${environment}-version"
-        """.trim()
-        
-        // Use Jenkins sh step instead of execute()
-        def responseText = sh(
-            script: curlCommand,
-            returnStdout: true
-        ).trim()
-        
-        if (responseText.contains('Property not found')) {
-            return 'NA'
-        } else if (responseText.isEmpty()) {
-            return 'EMPTY'
-        } else if (responseText.contains('error') || responseText.contains('Error')) {
-            return 'ERROR'
-        }
-        
-        return responseText
-        
-    } catch (Exception e) {
-        return "ERROR: ${e.message}"
-    }
-}
-----------------------------------------
-
-    sh """
-    echo '<!-- HTML Content -->' >> deployed-versions.html
-"""
------------------------------------------
-
-    publishHTML([
-                allowMissing: false,
-                alwaysLinkToLastBuild: true,
-                keepAll: true,
-                reportDir: '.',
-                reportFiles: 'deployed-versions.html',
-                reportName: 'Deployment Versions',
-                reportTitles: 'Last Deployed Versions'
-            ])
