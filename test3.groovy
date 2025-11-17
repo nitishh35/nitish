@@ -76,3 +76,14 @@ def call(def pcfOrg, def pcfSpace, def pcfFoundation, def manifestFile, def wire
         }
     }
 }
+
+     applications:
+- name: ecom-custid-mockservices
+  memory: 1G
+  disk_quota: 16
+  instances: 1
+  buildpack: java_buildpack_offline
+  env:
+    JBP_CONFIG_JAVA_MAIN: '{ arguments: "--port=\\\\$PORT" }'
+  routes:
+    - route: ecom-custid-mockservices.APP_DOMAIN_PLACEHOLDER
