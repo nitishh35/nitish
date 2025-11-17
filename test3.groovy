@@ -44,3 +44,27 @@ stage('pcf: deploy') {
 }
 
 
+
+
+   applications:
+  - name: ecom-custid-mockservices
+    buildpack: java_buildpack_offline
+    memory: 1G
+    disk_quota: 16G
+    instances: 1
+
+    # Internal ENV variables
+    env:
+      JBP_CONFIG_JAVA_MAIN: '{ arguments: "--port=\\\\$PORT" }'
+
+      # CF variable interpolation (very important)
+      ROUTE_DOMAIN: app.${PCF_FOUNDATION}.pcf.syfbank.com
+
+    routes:
+      - route: ecom-custid-mockservices.${ROUTE_DOMAIN}
+      - route: ecom-custid-mockservices-alt.${ROUTE_DOMAIN}
+
+
+
+
+
