@@ -1,6 +1,3 @@
-grrovy file
-
-
 def call(def pcfOrg, def pcfSpace, def pcfFoundation, def manifestFile, def wiremockJar) {
 
     def envProperty = loadEnvironmentProperties()
@@ -8,63 +5,74 @@ def call(def pcfOrg, def pcfSpace, def pcfFoundation, def manifestFile, def wire
     def pcfDeployCredentialId = envProperty.pcf_non_prod_deploy_credential_id
 
     def pcfFoundationUrl = "https://api.sys.${pcfFoundation}.pcf.syfbank.com"
+    def routeDomain = "app.${pcfFoundation}.pcf.syfbank.com"
 
     withCredentials([string(credentialsId: pcfDeployCredentialId, variable: 'credentials')]) {
 
+        // 🔹 Inject route domain into manifest file
         sh """
-        cf login --skip-ssl-validation \
-            -a '${pcfFoundationUrl}' \
-            -u '${pcfDeployUserId}' \
-            -p '${credentials}' \
-            -o '${pcfOrg}' \
-            -s '${pcfSpace}'
+            sed -i 's/APP_DOMAIN_PLACEHOLDER/${routeDomain}/g' ${manifestFile}
         """
 
-        // Pass PCF_FOUNDATION variable to CF push
+        // 🔹 Login to PCF
         sh """
-        PCF_FOUNDATION=${pcfFoundation} \
-        cf push -f '${manifestFile}' -p '${wiremockJar}'
+            cf login --skip-ssl-validation \
+                -a '${pcfFoundationUrl}' \
+                -u '${pcfDeployUserId}' \
+                -p '${credentials}' \
+                -o '${pcfOrg}' \
+                -s '${pcfSpace}'
         """
+
+        // 🔹 Push using manifest
+        sh "cf push -f '${manifestFile}' -p '${wiremockJar}'"
     }
 }
 
 
+   jenkins
+  
+      node(env.dse_worker_node) {
 
-jenkins file
-stage('pcf: deploy') {
-    logStage('pcf-deploy') {
-        wiremockDeployPCF(
-            pcfOrg,
-            params.PCF_SPACE,
-            params.PCF_FOUNDATION,   // dev1.use1 or dev1.use2
-            manifestFile,
-            wiremockJar
-        )
+    // Parameters
+    def gitProjectKey      = params.PROJECT_KEY
+    def gitRepositoryName  = params.REPOSITORY_NAME
+    def gitBranch          = params.BRANCH
+    def pcfSpace           = params.PCF_SPACE
+    def pcfFoundation      = params.PCF_FOUNDATION       // dev1.use1 / dev1.use2
+    def pcfOrg             = 'RC-Digital-Solutions'
+    def manifestFile       = 'manifest.wiremock.yml'
+    def wiremockJar        = 'wiremock-standalone-2.33.2.jar'
+
+    ansiColor('xterm') {
+        try {
+            timeout(time: 40, unit: 'MINUTES') {
+
+                stage('Checkout') {
+                    logStage('checkout') {
+                        // checkout scm
+                    }
+                }
+
+                stage('PCF Deploy') {
+                    logStage('pcf-deploy') {
+                        wiremockDeployPCF(
+                            pcfOrg,
+                            pcfSpace,
+                            pcfFoundation,
+                            manifestFile,
+                            wiremockJar
+                        )
+                    }
+                }
+
+            }
+        } catch (err) {
+            handleBuildFailure(err)
+        } finally {
+            if (currentBuild.result == 'FAILURE') {
+                handleFailure()
+            }
+        }
     }
 }
-
-
-
-
-   applications:
-  - name: ecom-custid-mockservices
-    buildpack: java_buildpack_offline
-    memory: 1G
-    disk_quota: 16G
-    instances: 1
-
-    # Internal ENV variables
-    env:
-      JBP_CONFIG_JAVA_MAIN: '{ arguments: "--port=\\\\$PORT" }'
-
-      # CF variable interpolation (very important)
-      ROUTE_DOMAIN: app.${PCF_FOUNDATION}.pcf.syfbank.com
-
-    routes:
-      - route: ecom-custid-mockservices.${ROUTE_DOMAIN}
-      - route: ecom-custid-mockservices-alt.${ROUTE_DOMAIN}
-
-
-
-
-
