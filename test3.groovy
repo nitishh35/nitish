@@ -1,53 +1,130 @@
-def call(def pcfOrg, def pcfSpace, def pcfFoundation, def manifestFile, def wiremockJar) {
+sendTeamNotification.groovy)
+import groovy.json.JsonOutput
 
-    def envProperty = loadEnvironmentProperties()
-    def pcfDeployUserId = envProperty.pcf_non_prod_deploy_user_id
-    def pcfDeployCredentialId = envProperty.pcf_non_prod_deploy_credential_id
+def call() {
+    try {
 
-    def pcfFoundationUrl = "https://api.sys.${pcfFoundation}.pcf.syfbank.com"
-    def routeDomain = "app.${pcfFoundation}.pcf.syfbank.com"
+        // --------------------------
+        // 1. Resolve build status
+        // --------------------------
+        String buildStatus = currentBuild.result ?: "SUCCESS"
+        String stageName   = env.failedStage ?: "NA"
+        String buildUrl    = env.BUILD_URL ?: ""
 
-    withCredentials([string(credentialsId: pcfDeployCredentialId, variable: 'credentials')]) {
+        // --------------------------
+        // 2. Resolve triggering user
+        // --------------------------
+        def userInfo = getBuildTriggeredUserDetails()
+        String triggeredUserName  = userInfo?.userName ?: "Unknown"
+        String triggeredUserEmail = userInfo?.userEmail ?: "Unknown"
 
-        echo "🔧 Updating manifest with domain: ${routeDomain}"
+        // Suppress notifications for service account
+        if (triggeredUserName.equalsIgnoreCase("SVC-APP-RLCT")) {
+            println "INFO: Notification suppressed for service account user: ${triggeredUserName}"
+            return
+        }
 
-        // -----------------------------
-        // STEP 1: Convert to UNIX format + Replace placeholder
-        // -----------------------------
-        sh """
-            # convert CRLF -> LF (safe even if file already LF)
-            dos2unix ${manifestFile} 2>/dev/null || true
+        // --------------------------
+        // 3. Build notification JSON
+        // --------------------------
+        Map buildData = [:]
+        buildData["pipelineURL"]     = buildUrl
+        buildData["triggeredBy"]     = triggeredUserName
+        buildData["triggeredByEmail"]= triggeredUserEmail
+        buildData["status"]          = buildStatus
+        buildData["stage"]           = stageName
 
-            # safe placeholder replacement using | delimiter
-            sed -i "s|APP_DOMAIN_PLACEHOLDER|${routeDomain}|g" ${manifestFile}
-        """
+        String buildDataJson = JsonOutput.toJson(buildData)
 
-        // -----------------------------
-        // STEP 2: Print updated manifest (debug)
-        // -----------------------------
-        sh """
-            echo '----- FINAL MANIFEST CONTENT -----'
-            cat ${manifestFile}
-            echo '----------------------------------'
-        """
+        // --------------------------
+        // 4. Resolve Teams channel
+        // --------------------------
+        String channelUrl = getProductWorkflowChannelUrl(buildUrl)
 
-        // -----------------------------
-        // STEP 3: Login to PCF
-        // -----------------------------
-        sh """
-            cf login --skip-ssl-validation \
-                -a '${pcfFoundationUrl}' \
-                -u '${pcfDeployUserId}' \
-                -p '${credentials}' \
-                -o '${pcfOrg}' \
-                -s '${pcfSpace}'
-        """
+        if (!channelUrl) {
+            println "WARN: No valid Teams channel found. Skipping notification."
+            return
+        }
 
-        // -----------------------------
-        // STEP 4: Deploy using manifest
-        // -----------------------------
-        sh """
-            cf push -f '${manifestFile}' -p '${wiremockJar}'
-        """
+        // --------------------------
+        // 5. Send Teams Notification
+        // --------------------------
+        notifyTeam(buildDataJson, channelUrl)
+
+    } catch (Exception e) {
+        println "ERROR: sendTeamNotification failed: ${e.message}"
+    }
+}
+
+
+
+
+// ======================================================================
+// HELPERS
+// ======================================================================
+
+// Extract Product/Capability folder name from Jenkins BUILD_URL
+def getProductWorkflowChannelUrl(String buildUrl) {
+
+    try {
+        def content = libraryResource('pipeline-global-config/workflow-urls.properties')
+        def props   = readProperties(text: content)
+
+        /*
+            Expected URL pattern:
+            https://jenkins/job/API-Products/job/Payments/job/buildNumber/
+
+            This regex extracts "Payments"
+        */
+        def matcher = buildUrl =~ /job\/([^\/]+)\/job\/([^\/]+)\//
+        String folderName = null
+
+        if (matcher.find()) {
+            folderName = matcher.group(2)
+        } else {
+            println "WARN: Could not derive folder name from URL: ${buildUrl}"
+            return null
+        }
+
+        String channelUrl = props[folderName]
+
+        if (!channelUrl) {
+            println "WARN: No Teams webhook mapped to folder '${folderName}'"
+            return null
+        }
+
+        return channelUrl
+
+    } catch (Exception e) {
+        println "ERROR: Failed extracting Teams channel: ${e.message}"
+        return null
+    }
+}
+
+
+
+// ======================================================================
+// Send Teams notification via curl
+// ======================================================================
+def notifyTeam(String buildDataJson, String channelUrl) {
+
+    try {
+        String sanitizedJson = buildDataJson.replace("'", "'\\''")
+
+        def responseCode = sh(
+            script: """
+                curl -k -w '%{http_code}' \
+                -H 'Content-Type: application/json' \
+                -H 'Accept: application/json' \
+                -X POST '${channelUrl}' \
+                -d '${sanitizedJson}'
+            """,
+            returnStdout: true
+        ).trim()
+
+        println "INFO: Teams notification HTTP response code: ${responseCode}"
+
+    } catch (Exception ex) {
+        println "ERROR: Teams notification failed: ${ex.message}"
     }
 }
