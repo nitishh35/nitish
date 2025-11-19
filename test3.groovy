@@ -410,3 +410,153 @@ def notifyTeam(def buildDataJson, def channelUrl) {
   "pcfFoundation": "east-1-dev1",
   "pcfSpace": "dev"
 }
+
+--------------------------------------
+    =======================================================================
+    --------------------------------------------------
+
+
+
+
+    from chagpt
+
+import groovy.json.JsonOutput
+
+def call() {
+    try {
+
+        // ---------------------------------------
+        // 1. Resolve Build Status & Stage
+        // ---------------------------------------
+        String buildStatus = currentBuild.result ?: "SUCCESS"
+        String stageName   = env.failedStage ?: "NA"
+        String buildUrl    = env.BUILD_URL ?: ""
+
+        // ---------------------------------------
+        // 2. Get User Details
+        // ---------------------------------------
+        def userInfo = getBuildTriggeredUserDetails()
+        String triggeredUserName  = userInfo?.userName ?: "Unknown"
+        String triggeredUserEmail = userInfo?.userEmail ?: "Unknown"
+
+        // Avoid sending alerts from Jenkins service account
+        if (triggeredUserName.equalsIgnoreCase("SVC-APP-RLCT")) {
+            println "INFO: Notification suppressed for service account user: ${triggeredUserName}"
+            return
+        }
+
+        // ---------------------------------------
+        // 3. Build Teams Notification Payload
+        // ---------------------------------------
+        Map payload = [
+            title : "Pipeline Status: ${buildStatus}",
+            text  : "Jenkins Pipeline Notification",
+            sections: [
+                [
+                    facts: [
+                        [ name: "Triggered By",     value: triggeredUserName ],
+                        [ name: "Triggered Email",  value: triggeredUserEmail ],
+                        [ name: "Pipeline URL",     value: buildUrl ],
+                        [ name: "Status",           value: buildStatus ],
+                        [ name: "Failed Stage",     value: stageName ]
+                    ]
+                ]
+            ]
+        ]
+
+        String jsonPayload = JsonOutput.toJson(payload)
+
+        // ---------------------------------------
+        // 4. Get Teams Channel URL
+        // ---------------------------------------
+        String channelUrl = getProductWorkflowChannelUrl(buildUrl)
+
+        if (!channelUrl) {
+            println "WARN: No valid Teams channel found. Skipping notification."
+            return
+        }
+
+        // ---------------------------------------
+        // 5. Send the Teams Notification
+        // ---------------------------------------
+        notifyTeam(jsonPayload, channelUrl)
+
+    } catch (Exception e) {
+        println "ERROR: sendTeamNotification failed: ${e.message}"
+    }
+}
+
+
+
+
+
+// ======================================================================
+//        Extract Product/Capability Folder Name → Map to Teams Webhook
+// ======================================================================
+def getProductWorkflowChannelUrl(String buildUrl) {
+
+    try {
+        def content = libraryResource('pipeline-global-config/workflow-urls.properties')
+        def props   = readProperties(text: content)
+
+        /*
+            Example URL:
+            https://jenkins/job/API-Products/job/Payments/job/Build/
+
+            Regex extracts → "Payments"
+        */
+        def matcher = buildUrl =~ /job\/([^\/]+)\/job\/([^\/]+)\//
+        String folderName = null
+
+        if (matcher.find()) {
+            folderName = matcher.group(2)
+        } else {
+            println "WARN: Unable to extract product folder name from URL: ${buildUrl}"
+            return null
+        }
+
+        String channelUrl = props[folderName]
+
+        if (!channelUrl) {
+            println "WARN: No Teams webhook mapped for folder '${folderName}'"
+            return null
+        }
+
+        return channelUrl
+
+    } catch (Exception e) {
+        println "ERROR: getProductWorkflowChannelUrl failed: ${e.message}"
+        return null
+    }
+}
+
+
+
+
+
+// ======================================================================
+//                  Send Notification to Teams via CURL
+// ======================================================================
+def notifyTeam(String jsonPayload, String channelUrl) {
+
+    try {
+        String safeJson = jsonPayload.replace("'", "'\\''")
+
+        def responseCode = sh(
+            script: """
+                curl -k -w '%{http_code}' \
+                -H 'Content-Type: application/json' \
+                -H 'Accept: application/json' \
+                -X POST '${channelUrl}' \
+                -d '${safeJson}'
+            """,
+            returnStdout: true
+        ).trim()
+
+        println "INFO: Teams notification HTTP response code: ${responseCode}"
+
+    } catch (Exception ex) {
+        println "ERROR: notifyTeam failed: ${ex.message}"
+    }
+}
+
