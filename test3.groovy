@@ -560,3 +560,39 @@ def notifyTeam(String jsonPayload, String channelUrl) {
     }
 }
 
+==========================================================================================================
+
+
+
+    build triggeruserdetail
+
+import hudson.tasks.Mailer
+import hudson.model.User
+
+def call() {
+
+    // Get build cause (User who triggered the build)
+    def buildCause = currentBuild.rawBuild.getCause(hudson.model.Cause.UserIdCause)
+    def userId = buildCause?.userId ?: "UNKNOWN"
+
+    // Get Jenkins User object
+    def userData = User.get(userId, false, null)
+
+    // Username
+    def userName = userData?.getDisplayName() ?: "UNKNOWN"
+
+    // Email
+    def mailProp = userData?.getProperty(Mailer.UserProperty)
+    def userEmail = mailProp?.getAddress() ?: "UNKNOWN"
+
+    // Build URL from Jenkins env
+    def buildUrl = env.BUILD_URL ?: "UNKNOWN"
+
+    return [
+        userName : userName,
+        userEmail: userEmail,
+        buildUrl : buildUrl
+    ]
+}
+
+
