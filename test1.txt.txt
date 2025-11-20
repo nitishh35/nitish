@@ -1,17 +1,389 @@
-// NOTE: No @Library annotation — we use the Jenkins shared lib namespace directly.
-def repoName = REPOSITORY_NAME ?: "enterprise-paymybill-payment-methods-sync-up-testing"
+// ==================================================================
+// FILE 1: sendTeamsNotification.groovy
+// Location: vars/sendTeamsNotification.groovy
+// ==================================================================
 
-// Load the shared library function
-def lib = org.jenkinsci.plugins.workflow.cps.GlobalVariable.getBinding().getVariable("getDeployedLastVersion")
+def call() {
+    try {
+        def buildStatus = currentBuild.result ?: 'SUCCESS'
+        def stageName = "NA"
+        
+        // Get failed stage if build failed
+        if (buildStatus.equalsIgnoreCase("FAILURE")) {
+            stageName = env.failedStage ?: "NA"
+        }
+        
+        // Get user information
+        def userInfo = getBuildTriggeredUserDetails()
+        def buildTriggeredUserEmailId = userInfo.userEmail
+        def buildTriggeredUserName = userInfo.userName
+        
+        // Skip notification for service account
+        if (buildTriggeredUserName == 'SVC-APP-RLCT') {
+            println "INFO: Notification suppressed for service account user: ${buildTriggeredUserName}"
+            return
+        }
+        
+        // Build data payload
+        def buildData = [:]
+        buildData["pipelineURL"] = env.BUILD_URL
+        buildData["triggeredBy"] = buildTriggeredUserName
+        buildData["triggeredByEmail"] = buildTriggeredUserEmailId
+        buildData["status"] = buildStatus
+        buildData["buildNumber"] = env.BUILD_NUMBER
+        buildData["jobName"] = env.JOB_NAME
+        
+        // Add stage information based on status
+        if (buildStatus == "FAILURE") {
+            buildData["stage"] = stageName
+        } else if (buildStatus == "SUCCESS" || buildStatus == "ABORTED" || buildStatus == "UNSTABLE") {
+            buildData["stage"] = "NA"
+        }
+        
+        // Convert to JSON
+        def buildDataJson = groovy.json.JsonOutput.toJson(buildData)
+        
+        // Get Teams channel URL
+        def channelUrl = getProductWorkflowChannelUrl()
+        
+        if (channelUrl) {
+            println "INFO: Sending notification to Teams channel..."
+            println "INFO: Build Data: ${buildDataJson}"
+            notifyTeam(buildDataJson, channelUrl)
+        } else {
+            println "WARN: No channel URL found, skipping Teams notification"
+        }
+        
+    } catch (Exception e) {
+        println "ERROR: Failed to send Teams notification: ${e.message}"
+        e.printStackTrace()
+    }
+}
 
-// Call the shared lib method
-return lib.call(repoName)
+def getProductWorkflowChannelUrl() {
+    try {
+        def content = libraryResource('pipeline-global-config/workflow-urls.properties')
+        def props = readProperties text: content
+        def buildUrl = env.BUILD_URL ?: ""
+        
+        // Extract product name from build URL
+        buildUrl = buildUrl =~ /\/job\/API-Products\/job\/([^\/]+)\//
+        def matcher = (buildUrl =~ /\/job\/API-Products\/job\/([^\/]+)\//)
+        def productName = null
+        
+        if (matcher.find()) {
+            productName = matcher.group(1)
+            println "INFO: Extracted product name: ${productName}"
+        } else {
+            println "WARN: Unable to extract the capability folder name from the URL: ${env.BUILD_URL}"
+            return null
+        }
+        
+        def channelUrl = props[productName]
+        
+        if (channelUrl) {
+            println "INFO: Found channel URL for product: ${productName}"
+            return channelUrl
+        } else {
+            println "WARN: No channel URL configured for product: ${productName}"
+            return null
+        }
+        
+    } catch (Exception e) {
+        println "ERROR: Failed to get product workflow channel URL: ${e.message}"
+        return null
+    }
+}
 
+def notifyTeam(def buildDataJson, def channelUrl) {
+    try {
+        def escapedJson = buildDataJson.replace("'", "'\\''")
+        def responseCode = sh(
+            script: """curl -k -w '%{http_code}' -H 'Content-Type: application/json' -H 'Accept: application/json' -X POST '${channelUrl}' -d '${escapedJson}'""",
+            returnStdout: true
+        ).trim()
+        
+        println "INFO: Teams channel HTTP response code: ${responseCode}"
+        
+        if (responseCode.startsWith("2")) {
+            println "INFO: Teams notification sent successfully"
+        } else {
+            println "WARN: Teams notification may have failed. Response code: ${responseCode}"
+        }
+        
+    } catch (Exception e) {
+        println "ERROR: Failed to send Teams notification via curl: ${e.message}"
+        throw e
+    }
+}
 
+// ==================================================================
+// FILE 2: getBuildTriggeredUserDetails.groovy
+// Location: vars/getBuildTriggeredUserDetails.groovy
+// ==================================================================
 
+import hudson.tasks.Mailer
+import hudson.model.User
 
-second approach
+def call() {
+    try {
+        // Get the user who triggered the build
+        def buildCause = currentBuild.rawBuild.getCause(hudson.model.Cause.UserIdCause.class)
+        
+        def userId = buildCause?.getUserId() ?: 'unknown'
+        def userName = 'Unknown User'
+        def userEmail = 'no-reply@example.com'
+        
+        if (userId && userId != 'unknown') {
+            def userData = User.get(userId, false)
+            
+            if (userData) {
+                userName = userData.getDisplayName() ?: userData.getId()
+                
+                // Get email property
+                def mailProp = userData.getProperty(Mailer.UserProperty.class)
+                userEmail = mailProp?.getAddress() ?: 'no-reply@example.com'
+            }
+        } else {
+            // Try to get from other causes (SCM, Timer, etc.)
+            def causes = currentBuild.rawBuild.getCauses()
+            if (causes) {
+                userName = causes[0].getShortDescription()
+            }
+        }
+        
+        def buildUrl = env.BUILD_URL ?: "Not Available"
+        
+        println "INFO: Build triggered by: ${userName} (${userEmail})"
+        
+        return [
+            userName: userName,
+            userEmail: userEmail,
+            buildUrl: buildUrl
+        ]
+        
+    } catch (Exception e) {
+        println "ERROR: Failed to get build triggered user details: ${e.message}"
+        
+        // Return default values on error
+        return [
+            userName: 'Unknown User',
+            userEmail: 'no-reply@example.com',
+            buildUrl: env.BUILD_URL ?: "Not Available"
+        ]
+    }
+}
 
+// ==================================================================
+// FILE 3: POC Jenkins Pipeline Job
+// Create a new Pipeline job in Jenkins and paste this code
+// ==================================================================
 
-// Safe sandboxed wrapper
-return getDeployedLastVersion(REPOSITORY_NAME ?: "enterprise-paymybill-payment-methods-sync-up-testing")
+@Library('your-shared-library') _
+
+pipeline {
+    agent any
+    
+    parameters {
+        choice(
+            name: 'TEST_SCENARIO',
+            choices: ['SUCCESS', 'FAILURE', 'UNSTABLE', 'ABORTED'],
+            description: 'Select the build scenario to test Teams notification'
+        )
+        choice(
+            name: 'FAILURE_STAGE',
+            choices: ['Build', 'Test', 'Generate Newman Report', 'Deploy'],
+            description: 'Stage name to fail (only used when TEST_SCENARIO is FAILURE)'
+        )
+        booleanParam(
+            name: 'SEND_NOTIFICATION',
+            defaultValue: true,
+            description: 'Enable/Disable Teams notification'
+        )
+        string(
+            name: 'DELAY_SECONDS',
+            defaultValue: '2',
+            description: 'Delay in seconds for each stage (simulate real build time)'
+        )
+    }
+    
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+        timestamps()
+    }
+    
+    stages {
+        stage('Initialize') {
+            steps {
+                script {
+                    echo "=========================================="
+                    echo "   Teams Notification POC Test"
+                    echo "=========================================="
+                    echo "Test Scenario    : ${params.TEST_SCENARIO}"
+                    echo "Failure Stage    : ${params.FAILURE_STAGE}"
+                    echo "Send Notification: ${params.SEND_NOTIFICATION}"
+                    echo "Build URL        : ${env.BUILD_URL}"
+                    echo "Build Number     : ${env.BUILD_NUMBER}"
+                    echo "Job Name         : ${env.JOB_NAME}"
+                    echo "=========================================="
+                    
+                    // Display user info
+                    try {
+                        def userInfo = getBuildTriggeredUserDetails()
+                        echo "\nBuild Triggered By:"
+                        echo "  Name : ${userInfo.userName}"
+                        echo "  Email: ${userInfo.userEmail}"
+                        echo "  URL  : ${userInfo.buildUrl}"
+                    } catch (Exception e) {
+                        echo "Unable to fetch user details: ${e.message}"
+                    }
+                    echo "=========================================="
+                }
+            }
+        }
+        
+        stage('Build') {
+            steps {
+                script {
+                    echo "Executing Build stage..."
+                    sleep(params.DELAY_SECONDS.toInteger())
+                    
+                    if (params.TEST_SCENARIO == 'FAILURE' && params.FAILURE_STAGE == 'Build') {
+                        env.failedStage = 'Build'
+                        error("❌ Simulated Build failure")
+                    }
+                    
+                    echo "✅ Build completed successfully"
+                }
+            }
+        }
+        
+        stage('Test') {
+            steps {
+                script {
+                    echo "Executing Test stage..."
+                    sleep(params.DELAY_SECONDS.toInteger())
+                    
+                    if (params.TEST_SCENARIO == 'FAILURE' && params.FAILURE_STAGE == 'Test') {
+                        env.failedStage = 'Test'
+                        error("❌ Simulated Test failure")
+                    }
+                    
+                    if (params.TEST_SCENARIO == 'UNSTABLE') {
+                        currentBuild.result = 'UNSTABLE'
+                        echo "⚠️ Setting build status to UNSTABLE"
+                    }
+                    
+                    echo "✅ Tests completed successfully"
+                }
+            }
+        }
+        
+        stage('Generate Newman Report') {
+            steps {
+                script {
+                    echo "Executing Generate Newman Report stage..."
+                    sleep(params.DELAY_SECONDS.toInteger())
+                    
+                    if (params.TEST_SCENARIO == 'FAILURE' && params.FAILURE_STAGE == 'Generate Newman Report') {
+                        env.failedStage = 'Generate Newman Report'
+                        error("❌ Simulated Newman Report generation failure")
+                    }
+                    
+                    echo "✅ Newman report generated successfully"
+                }
+            }
+        }
+        
+        stage('Deploy') {
+            steps {
+                script {
+                    echo "Executing Deploy stage..."
+                    sleep(params.DELAY_SECONDS.toInteger())
+                    
+                    if (params.TEST_SCENARIO == 'FAILURE' && params.FAILURE_STAGE == 'Deploy') {
+                        env.failedStage = 'Deploy'
+                        error("❌ Simulated Deploy failure")
+                    }
+                    
+                    if (params.TEST_SCENARIO == 'ABORTED') {
+                        currentBuild.result = 'ABORTED'
+                        echo "🛑 Simulating build abort..."
+                        error("Build aborted by user")
+                    }
+                    
+                    echo "✅ Deployment completed successfully"
+                }
+            }
+        }
+    }
+    
+    post {
+        success {
+            script {
+                echo "\n=========================================="
+                echo "✅ BUILD SUCCESSFUL"
+                echo "=========================================="
+                currentBuild.result = 'SUCCESS'
+            }
+        }
+        
+        failure {
+            script {
+                echo "\n=========================================="
+                echo "❌ BUILD FAILED"
+                echo "Failed Stage: ${env.failedStage ?: 'Unknown'}"
+                echo "=========================================="
+                currentBuild.result = 'FAILURE'
+            }
+        }
+        
+        unstable {
+            script {
+                echo "\n=========================================="
+                echo "⚠️ BUILD UNSTABLE"
+                echo "=========================================="
+            }
+        }
+        
+        aborted {
+            script {
+                echo "\n=========================================="
+                echo "🛑 BUILD ABORTED"
+                echo "=========================================="
+            }
+        }
+        
+        always {
+            script {
+                echo "\n=========================================="
+                echo "   Final Build Information"
+                echo "=========================================="
+                echo "Status      : ${currentBuild.result}"
+                echo "Duration    : ${currentBuild.durationString}"
+                echo "Build Number: ${env.BUILD_NUMBER}"
+                echo "=========================================="
+                
+                // Send Teams notification
+                if (params.SEND_NOTIFICATION) {
+                    echo "\n📢 Sending Teams Notification..."
+                    echo "=========================================="
+                    try {
+                        sendTeamsNotification()
+                        echo "✅ Teams notification sent successfully!"
+                    } catch (Exception e) {
+                        echo "❌ Failed to send Teams notification"
+                        echo "Error: ${e.message}"
+                        e.printStackTrace()
+                    }
+                } else {
+                    echo "\n📢 Teams notification is DISABLED"
+                }
+                
+                echo "\n=========================================="
+                echo "   POC Test Completed"
+                echo "=========================================="
+            }
+        }
+    }
+}
