@@ -87,3 +87,200 @@ def createEmailJson(def emailAddressList) {
     return jsonString
 }
 th
+========================================
+
+
+    how to test the fortify
+
+To test your updated **notifyTeamChannel.groovy** (DevOps + Fortify changes) **locally**, you cannot directly execute shared-library Groovy inside Jenkins DSL.
+
+But you *can* perform a complete local test using **3 reliable methods**:
+
+---
+
+# ✅ **METHOD 1: Test using a Local Bash Script (Recommended)**
+
+This method lets you confirm:
+
+* JSON formatting
+* Pipeline URL injection
+* Curl escaping
+* No syntax errors
+
+### **Step 1 — Create a local test JSON input**
+
+Make a test file:
+
+`test-input.txt`:
+
+```
+ravi@syf.com, ahasan@syf.com
+```
+
+### **Step 2 — Simulate createEmailJson() output**
+
+If using email JSON:
+
+```
+{"email1":"ravi@syf.com","email2":"ahasan@syf.com"}
+```
+
+If using plain string:
+
+```
+ravi@syf.com, ahasan@syf.com
+```
+
+### **Step 3 — Simulate your enrichedDataString**
+
+Run this in a shell:
+
+```bash
+EMAILS="ravi@syf.com, ahasan@syf.com"
+BUILD_URL="https://jenkins/job/test/15/"
+
+echo "$EMAILS, $BUILD_URL"
+```
+
+This confirms the format is correct.
+
+### **Step 4 — Dry-run the curl**
+
+Use a dummy endpoint like httpbin:
+
+```bash
+curl -X POST https://httpbin.org/post \
+     -H "Content-Type: application/json" \
+     -d '{"email1":"ravi@syf.com","email2":"ahasan@syf.com","pipelineUrl":"https://jenkins/job/test/15/"}'
+```
+
+You will see exactly what PowerAutomate would receive.
+
+---
+
+# ✅ **METHOD 2: Test inside Jenkins using a Sandbox Job**
+
+This is the **best simulation of real behavior**.
+
+Create a freestyle pipeline job with:
+
+```groovy
+node {
+    def envProperty = [
+        devops_workflow_url: "https://httpbin.org/post",
+        fortify_workflow_url: "https://httpbin.org/post",
+        to_email_address_list: "ravi@syf.com, ahasan@syf.com, nitish@syf.com",
+        fortify_channel_emails_json: '{"email1":"Brad","email2":"Gerald"}'
+    ]
+
+    env.BUILD_URL = "https://jenkins/job/test/15/"
+
+    notifyTeamChannel()
+}
+```
+
+Import your shared library using:
+
+```
+@Library('your-lib') _
+```
+
+This will show:
+
+* Final payload
+* Response from httpbin
+* No errors
+
+---
+
+# ✅ **METHOD 3: Test Groovy Script Locally Using Groovy Console**
+
+You can also test in a local Groovy REPL.
+
+### **Step 1 — Create a Local Test File:**
+
+`notifyTest.groovy`:
+
+```groovy
+def emailAddressList = "ravi@syf.com, ahasan@syf.com"
+
+def createEmailJson = { input ->
+    def emailList = input.split(',').collect { it.trim() }
+    def emailMap = [:]
+    emailList.eachWithIndex { email, i ->
+        emailMap["email${i+1}"] = email
+    }
+    groovy.json.JsonOutput.toJson(emailMap)
+}
+
+def dataString = createEmailJson(emailAddressList)
+def enrichedDataString = dataString.replace("}", ", \"pipelineUrl\": \"https://jenkins/job/test/15/\"}")
+
+println enrichedDataString
+```
+
+### **Step 2 — Run it locally:**
+
+```
+groovy notifyTest.groovy
+```
+
+This prints EXACT JSON your real script will send.
+
+---
+
+# 🟩 **WHAT YOU SHOULD VERIFY IN OUTPUT**
+
+Make sure the result prints:
+
+```json
+{
+  "email1": "ravi@syf.com",
+  "email2": "ahasan@syf.com",
+  "pipelineUrl": "https://jenkins/job/test/15/"
+}
+```
+
+This confirms:
+
+* JSON merges correctly
+* No syntax errors
+* Nothing breaks in Groovy
+
+Then:
+
+### Run the curl manually:
+
+```
+curl -X POST https://httpbin.org/post \
+     -H "Content-Type: application/json" \
+     -d '{"email1":"ravi@syf.com","email2":"ahasan@syf.com","pipelineUrl":"https://jenkins/job/test/15/"}'
+```
+
+You will see:
+
+```
+{
+  "json": {
+    "email1": "ravi@syf.com",
+    "email2": "ahasan@syf.com",
+    "pipelineUrl": "https://jenkins/job/test/15/"
+  }
+}
+```
+
+This means it will **100% work with PowerAutomate**.
+
+---
+
+# 🎯 WANT ME TO CREATE A READY-TO-RUN LOCAL TEST SCRIPT?
+
+I can generate:
+
+* a full `.sh` file
+* a full `.groovy` local test harness
+* or a Jenkins sandbox pipeline
+
+Just tell me:
+
+👉 **“Give me a local test script”**
