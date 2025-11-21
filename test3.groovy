@@ -1,23 +1,25 @@
-def call() {
+complted modified sript with devops and forfity svript
+====================================================
+
+    def call() {
 
     // Load environment properties
     def envProperty = loadEnvironmentProperties()
 
     def devopsWorkFlowUrl        = envProperty.devops_workflow_url
     def fortifyWorkFlowUrl       = envProperty.fortify_workflow_url
+
     def devopsChannelMessage     = envProperty.devops_channel_message
     def fortifyChannelEmailsJson = envProperty.fortify_channel_emails_json
     def emailAddressList         = envProperty.to_email_address_list
 
 
-    // ----------------------------
-    // DEVOPS NOTIFICATION SECTION
-    // ----------------------------
+    // ----------------------------------------
+    // DEVOPS NOTIFICATION (unchanged here)
+    // ----------------------------------------
 
-    // Convert email list to JSON using your existing function
     def dataString = createEmailJson(emailAddressList)
 
-    // Append pipeline URL into SAME JSON (flat JSON merge)
     def enrichedDataString = dataString.replace(
         "}",
         ", \"pipelineUrl\": \"${env.BUILD_URL}\"}"
@@ -25,7 +27,6 @@ def call() {
 
     println "INFO: DevOps JSON to send: ${enrichedDataString}"
 
-    // Send to DevOps workflow
     def devopsChannelResponseCode = sh(
         script: """
             curl -ks -w '%{http_code}' \
@@ -40,9 +41,17 @@ def call() {
     println "INFO: DevOps Teams channel response code: ${devopsChannelResponseCode}"
 
 
-    // ----------------------------
-    // FORTIFY NOTIFICATION SECTION
-    // ----------------------------
+    // ----------------------------------------
+    // FORTIFY NOTIFICATION (UPDATED SECTION)
+    // ----------------------------------------
+
+    // Add pipeline URL inside fortify JSON
+    def enrichedFortifyJson = fortifyChannelEmailsJson.replace(
+        "}",
+        ", \"pipelineUrl\": \"${env.BUILD_URL}\"}"
+    )
+
+    println "INFO: Fortify JSON to send: ${enrichedFortifyJson}"
 
     def fortifyResponseCode = sh(
         script: """
@@ -50,7 +59,7 @@ def call() {
             -H 'Content-Type: application/json' \
             -H 'Accept: application/json' \
             -X POST '${fortifyWorkFlowUrl}' \
-            -d '${fortifyChannelEmailsJson.replace("'", "'\\\\''")}'
+            -d '${enrichedFortifyJson.replace("'", "'\\\\''")}'
         """,
         returnStdout: true
     ).trim()
@@ -59,9 +68,9 @@ def call() {
 }
 
 
-// -------------------------------------------------------
+// ----------------------------------------
 // FUNCTION: createEmailJson()
-// -------------------------------------------------------
+// ----------------------------------------
 def createEmailJson(def emailAddressList) {
 
     def emailList = emailAddressList.split(',').collect { it.trim() }
