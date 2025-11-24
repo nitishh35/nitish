@@ -1,1 +1,17 @@
-hi there
+dir('target/docs') {
+
+    def foundation = pcfFoundation.toLowerCase()
+
+    if (foundation.contains('east')) {
+        staticFileDeployPCFWithManifest(pcfOrg, pcfSpace, 'dev.use1')
+
+    } else if (foundation.contains('dev2') && foundation.contains('phx')) {
+        staticFileDeployPCFWithManifest(pcfOrg, pcfSpace, 'dev2.phx')
+
+    } else if (foundation.contains('dev2') && foundation.contains('dal')) {
+        staticFileDeployPCFWithManifest(pcfOrg, pcfSpace, 'dev2.dal')
+
+    } else {
+        staticFileDeployPCFWithManifest(pcfOrg, pcfSpace, 'dev.use2')
+    }
+}
