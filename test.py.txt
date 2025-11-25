@@ -1,0 +1,38 @@
+def call(def pcfOrg, def pcfSpace) {
+
+    def foundationData = getPcfFoundationAvailability()
+
+    // Convert N → NO, Y → YES
+    def dev2dal   = foundationData.DEV2DAL?.equalsIgnoreCase('N')   ? "NO" : "YES"
+    def dev2phx   = foundationData.DEV2PHX?.equalsIgnoreCase('N')   ? "NO" : "YES"
+    def dev1east1 = foundationData.DEV1EAST1?.equalsIgnoreCase('N') ? "NO" : "YES"
+    def dev1east2 = foundationData.DEV1EAST2?.equalsIgnoreCase('N') ? "NO" : "YES"
+
+    // ----------- ONLY ONE FOUNDATION MUST EXECUTE ------------
+
+    if (dev2dal == "YES") {
+        println "INFO: Deploying to DEV2-DAL foundation"
+        staticFileDeployPCFWithManifest(pcfOrg, pcfSpace, 'api.sys.dev2.dal.pcf.syfbank.com')
+        return
+    }
+
+    if (dev2phx == "YES") {
+        println "INFO: Deploying to DEV2-PHX foundation"
+        staticFileDeployPCFWithManifest(pcfOrg, pcfSpace, 'api.sys.dev2.phx.pcf.syfbank.com')
+        return
+    }
+
+    if (dev1east1 == "YES") {
+        println "INFO: Deploying to DEV1-EAST1 foundation"
+        staticFileDeployPCFWithManifest(pcfOrg, pcfSpace, 'api.sys.dev1.use1.pcf.syfbank.com')
+        return
+    }
+
+    if (dev1east2 == "YES") {
+        println "INFO: Deploying to DEV1-EAST2 foundation"
+        staticFileDeployPCFWithManifest(pcfOrg, pcfSpace, 'api.sys.dev1.use2.pcf.syfbank.com')
+        return
+    }
+
+    error "ERROR: No foundation is available for deployment"
+}
