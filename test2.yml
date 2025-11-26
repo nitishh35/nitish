@@ -290,4 +290,347 @@ If you want, I can also generate:
 
 🔹 A shared library extraction plan (to move heavy logic out of Jenkinsfile)
 
-Just tell me what you want next.
+Just tell me what you want nex
+
+
+
+Πππππππππππππ√√√√√√√√√√√√√√√√√√√√
+
+Below is the Confluence-ready Section 5 (Scripted Pipeline Standards) written specifically for your pipeline style.
+It replaces the original Declarative version and matches your coding context exactly.
+
+You can copy-paste this directly into Confluence.
+
+
+---
+
+5. Jenkins Pipeline Standards (Scripted Pipeline)
+
+> This section defines the required structure, patterns, and best practices for all Scripted Pipelines used by the DSE DevOps team.
+
+
+
+Although Jenkins supports both Declarative and Scripted syntax, DSE DevOps standardizes on Scripted Pipelines for complex CI/CD workflows due to the flexibility they provide for dynamic logic, looping, conditional deployment, and integration with shared libraries.
+
+This section defines how every Scripted Jenkinsfile must be structured and implemented.
+
+
+---
+
+5.1 Required Scripted Pipeline Structure
+
+Every Jenkinsfile must follow this high-level structure:
+
+node(env.dse_worker_node) {
+
+    // Pipeline properties (always first)
+    properties([...])
+    ansiColor('xterm')
+    timestamps()
+
+    // Collect parameters and initialize runtime variables
+    def var1 = params.VAR1
+    def var2 = params.VAR2
+
+    try {
+        timeout(...) {
+
+            stage("Checkout") { ... }
+
+            stage("Validate") { ... }
+
+            stage("Build") { ... }
+
+            parallel(
+                "Scan A": { ... },
+                "Scan B": { ... },
+                "Scan C": { ... }
+            )
+
+            stage("Deploy") { ... }
+
+            stage("Post-Processing") { ... }
+
+            buildSuccess()
+        }
+    }
+    catch (err) {
+        handleBuildFailure(err)
+    }
+    finally {
+        sendTeamsNotification()
+    }
+}
+
+Why this structure?
+
+Ensures predictable CI/CD behavior
+
+Prevents concurrency issues
+
+Standardizes error handling
+
+Provides consistent logging & notifications
+
+Allows faster onboarding of new engineers
+
+
+
+---
+
+5.2 Stage Naming Conventions
+
+Stage names must use Title Case with clear purpose:
+
+Checkout
+
+Validate Build Properties
+
+Validate Manifest
+
+Build
+
+Scan: Sonar
+
+Scan: Fortify
+
+Scan: NexusIQ
+
+uDeploy: Import Artifact
+
+uDeploy: Deploy
+
+Generate Newman Report
+
+
+Rules:
+
+Use the same stage names across all repos for consistency.
+
+Keep names short but descriptive.
+
+Prefix functional groups with a domain (example: scan: sonar, scan: fortify).
+
+
+
+---
+
+5.3 Parameters, Variables & Environment Usage
+
+Parameters
+
+All user inputs must come through Jenkins parameters:
+
+def gitBranch = params.BRANCH
+def pcfSpace  = params.PCF_SPACE
+def pcfFoundation = params.PCF_FOUNDATION
+
+Environment Variables
+
+Use env.* only for non-sensitive pipeline-wide variables:
+
+env.pipelineEnv = 'dev'
+
+⚠️ Never place credentials in env variables.
+
+Credentials
+
+Always use Jenkins withCredentials block:
+
+withCredentials([usernamePassword(credentialsId: 'nexus-creds',
+                                  usernameVariable: 'NEXUS_USER',
+                                  passwordVariable: 'NEXUS_PASS')]) {
+    sh "./publish.sh --user $NEXUS_USER --password $NEXUS_PASS"
+}
+
+
+---
+
+5.4 Error Handling & Failure Behavior
+
+Fail Fast
+
+All failures must be clearly surfaced:
+
+error("Deployment failed: ${ex.message}")
+
+Try/Catch for Controlled Failures
+
+Use try/catch only around sections where custom error messages or cleanup is needed:
+
+try {
+    dseDeploy.deployToEnv(env.pipelineEnv)
+} catch (Exception ex) {
+    echo "ERROR: Deployment failed – ${ex.message}"
+    error("Deployment failed")
+}
+
+Never swallow errors.
+
+
+---
+
+5.5 Parallel Execution Standards
+
+When running multiple scans/tests, always group them under a parallel {} block:
+
+parallel(
+    "scan: sonar": { ... },
+    "scan: fortify": { ... },
+    "scan: nexus-iq": { ... }
+)
+
+Rules:
+
+Every branch must contain its own stage{} for proper visualization in classic UI.
+
+Each branch must be self-contained and not rely on variables mutated elsewhere.
+
+
+
+---
+
+5.6 Shared Library Usage
+
+All reusable logic must be placed in the shared library (vars/ and src/), not inside Jenkinsfiles.
+
+Required pattern:
+
+@Library('dse-shared-lib') _
+
+Shared library functions must be used for:
+
+Code checkout
+
+Build logic
+
+Testing
+
+Deployment
+
+Notifications
+
+PCF and uDeploy interactions
+
+Manifest validation
+
+Logging helpers (logStage())
+
+
+Benefits:
+
+Reduces code duplication
+
+Makes Jenkinsfiles shorter and readable
+
+Improves maintainability
+
+Enables consistent implementations across repos
+
+
+
+---
+
+5.7 Manifest Validation and Foundation Logic
+
+Pipelines must never hard-code multi-foundation logic inline.
+
+Use conditional checks tied to parameters:
+
+if (pcfFoundation.equalsIgnoreCase('east-1-dev1')) {
+    validateSplunkIndex(manifestFiles.dev1east1, 'prod')
+}
+
+Manifest file names must be parameterized or retrieved from shared library helpers:
+
+def manifestFiles = [
+    dev1east1 : "manifest-dev1-east1.yml",
+    dev1east2 : "manifest-dev1-east2.yml",
+    ...
+]
+
+Rules:
+
+Each foundation must have a corresponding manifest
+
+If manifest not found → pipeline must fail
+
+Each manifest must be validated before uDeploy import
+
+
+
+---
+
+5.8 Logging Standards
+
+Use consistent log wrappers:
+
+logStage("build") { ... }
+
+Log levels:
+
+INFO: Standard progress
+
+WARN: Recoverable issue
+
+ERROR: Stage-ending or pipeline-ending issue
+
+
+Never log secrets or entire credential objects.
+
+
+---
+
+5.9 Notification Standards
+
+All pipelines must end with a notification block:
+
+finally {
+    sendTeamsNotification()
+}
+
+Notification should include:
+
+Build URL
+
+Build Number
+
+Status (Success/Failure)
+
+Failed Stage if available
+
+
+
+---
+
+⭐ 5.10 Scripted Pipeline Summary (TL;DR)
+
+Use a consistent node {} structure
+
+Keep logic in shared libraries, not the Jenkinsfile
+
+Pattern: parameters → validate → build → scan → deploy → test → notify
+
+Fail fast and never hide errors
+
+Always use parallel {} for scans
+
+Always validate manifest per foundation
+
+Always send notifications
+
+Keep Jenkinsfile readable and orchestration-only
+
+
+
+---
+
+⭐ If you want, I can also provide:
+
+✔ A visual diagram for this pipeline flow
+✔ A side-by-side comparison of Declarative vs Scripted
+✔ A checklist developers must follow before raising PRs
+✔ A pipeline template file for new projects
+
+Just tell me what you need next.
+
