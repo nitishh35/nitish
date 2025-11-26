@@ -111,3 +111,46 @@ Assuming `pcfSpace = "Ecom-API-PayMyBill-QA"`:
 5. ✅ Each foundation gets its own unique route, avoiding conflicts
 
 This will resolve the "Routes cannot be mapped to destinations in different spaces" error!
+
+==============================================================================
+
+
+delete route and create route
+
+def call(def org, def pcfSpace, def pcfFoundation) {
+    def envProperty = loadEnvironmentProperties()
+    def pcfDeployUserId = envProperty.pcf_non_prod_deploy_user_id
+    def pcfDeployCredentialId = envProperty.pcf_non_prod_deploy_credential_id
+    
+    def appName = "paymybill-api-features"
+    
+    // Get the base domain (without api.sys prefix)
+    def pcfFoundationDomain = pcfFoundation.replace('api.sys.', '').replace('https://', '').replace('http://', '')
+    
+    // Create foundation-specific identifier
+    def foundationId = pcfFoundation.tokenize('.')[2..3].join('-')
+    
+    def spaceName = pcfSpace.toLowerCase().replaceAll('[^a-z0-9]', '-')
+    def hostname = "${appName}-${spaceName}-${foundationId}"
+    
+    withCredentials([string(credentialsId: pcfDeployCredentialId, variable: 'credentials')]) {
+        sh "cf login --skip-ssl-validation -a '${pcfFoundation}' -u '${pcfDeployUserId}' -p '${credentials}' -o '${org}' -s '${pcfSpace}'"
+        
+        // Check if app exists and delete old routes
+        def appExists = sh(script: "cf app ${appName}", returnStatus: true) == 0
+        if (appExists) {
+            println "INFO: Removing existing routes for ${appName}"
+            sh "cf unmap-route ${appName} ${pcfFoundationDomain} --hostname ${appName} || true"
+            sh "cf delete-route ${pcfFoundationDomain} --hostname ${appName} -f || true"
+        }
+        
+        // Push with no-route flag (overrides manifest)
+        sh "cf push ${appName} --no-route -p build -b staticfile_buildpack -m 128M -k 256M"
+        
+        // Map the unique route
+        sh "cf map-route ${appName} ${pcfFoundationDomain} --hostname ${hostname}"
+        
+        println "INFO: Successfully deployed to ${pcfFoundation}"
+        println "INFO: Access URL: https://${hostname}.${pcfFoundationDomain}"
+    }
+}
