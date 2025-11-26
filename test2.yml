@@ -114,9 +114,6 @@ This will resolve the "Routes cannot be mapped to destinations in different spac
 
 ==============================================================================
 
-
-delete route and create route
-
 def call(def org, def pcfSpace, def pcfFoundation) {
     def envProperty = loadEnvironmentProperties()
     def pcfDeployUserId = envProperty.pcf_non_prod_deploy_user_id
@@ -124,33 +121,36 @@ def call(def org, def pcfSpace, def pcfFoundation) {
     
     def appName = "paymybill-api-features"
     
-    // Get the base domain (without api.sys prefix)
-    def pcfFoundationDomain = pcfFoundation.replace('api.sys.', '').replace('https://', '').replace('http://', '')
+    // Convert api.sys.dev2.dal.pcf.syfbank.com -> app.dev2.dal.pcf.syfbank.com
+    def pcfFoundationDomain = pcfFoundation.replace('api.sys.', 'app.')
     
-    // Create foundation-specific identifier
-    def foundationId = pcfFoundation.tokenize('.')[2..3].join('-')
+    // Create unique hostname based on foundation
+    def foundationShort = ""
+    if (pcfFoundation.contains("dev2.dal")) {
+        foundationShort = "dev2-dal"
+    } else if (pcfFoundation.contains("dev2.phx")) {
+        foundationShort = "dev2-phx"
+    } else if (pcfFoundation.contains("dev1.use1")) {
+        foundationShort = "dev1-use1"
+    } else if (pcfFoundation.contains("dev1.use2")) {
+        foundationShort = "dev1-use2"
+    }
     
     def spaceName = pcfSpace.toLowerCase().replaceAll('[^a-z0-9]', '-')
-    def hostname = "${appName}-${spaceName}-${foundationId}"
+    def uniqueHostname = "${appName}-${spaceName}-${foundationShort}"
     
     withCredentials([string(credentialsId: pcfDeployCredentialId, variable: 'credentials')]) {
         sh "cf login --skip-ssl-validation -a '${pcfFoundation}' -u '${pcfDeployUserId}' -p '${credentials}' -o '${org}' -s '${pcfSpace}'"
         
-        // Check if app exists and delete old routes
-        def appExists = sh(script: "cf app ${appName}", returnStatus: true) == 0
-        if (appExists) {
-            println "INFO: Removing existing routes for ${appName}"
-            sh "cf unmap-route ${appName} ${pcfFoundationDomain} --hostname ${appName} || true"
-            sh "cf delete-route ${pcfFoundationDomain} --hostname ${appName} -f || true"
-        }
+        println "INFO: Deploying ${appName} with unique route: ${uniqueHostname}.${pcfFoundationDomain}"
         
-        // Push with no-route flag (overrides manifest)
-        sh "cf push ${appName} --no-route -p build -b staticfile_buildpack -m 128M -k 256M"
+        // Push with no-route (manifest will be used for other settings)
+        sh "cf push --no-route"
         
         // Map the unique route
-        sh "cf map-route ${appName} ${pcfFoundationDomain} --hostname ${hostname}"
+        sh "cf map-route ${appName} ${pcfFoundationDomain} --hostname ${uniqueHostname}"
         
-        println "INFO: Successfully deployed to ${pcfFoundation}"
-        println "INFO: Access URL: https://${hostname}.${pcfFoundationDomain}"
+        println "INFO: Deployment successful!"
+        println "INFO: Application URL: https://${uniqueHostname}.${pcfFoundationDomain}"
     }
 }
