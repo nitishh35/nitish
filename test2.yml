@@ -166,49 +166,77 @@ def call(def org, def pcfSpace, def pcfFoundation) {
     def pcfDeployUserId = envProperty.pcf_non_prod_deploy_user_id
     def pcfDeployCredentialId = envProperty.pcf_non_prod_deploy_credential_id
 
-    def appName = "paymybill-api-features"
+    //--------------------------------------------------------------------
+    // 1. Extract app name from manifest.yml (safe for all YAML formats)
+    //--------------------------------------------------------------------
+    def appName = sh(
+        script: """
+            grep -E '^[[:space:]]*-?[[:space:]]*name:' manifest.yml \
+            | head -1 \
+            | sed 's/.*name:[[:space:]]*//'
+        """,
+        returnStdout: true
+    ).trim()
+
+    if (!appName) {
+        error "Unable to extract app name from manifest.yml"
+    }
+
+    println "INFO: Extracted app name from manifest: ${appName}"
+
 
     //--------------------------------------------------------------------
-    // 1. Convert ANY api.sys.* → app.*
-    //--------------------------------------------------------------------
-    // Example:
-    // api.sys.dev2.dal.pcf.syfbank.com --> app.dev2.dal.pcf.syfbank.com
+    // 2. Convert API domain → APP domain for ALL foundations
+    //    api.sys.dev2.dal.pcf.syfbank.com  → app.dev2.dal.pcf.syfbank.com
+    //    api.sys.dev1.use1.pcf.syfbank.com → app.dev1.use1.pcf.syfbank.com
     //--------------------------------------------------------------------
     def pcfDomain = pcfFoundation.replace("api.sys.", "app.")
 
+
     //--------------------------------------------------------------------
-    // Hostname = ONLY appName
+    // 3. Hostname = Just the app name (your requirement)
     //--------------------------------------------------------------------
     def hostname = appName
 
 
     //--------------------------------------------------------------------
-    // 3. Login + Push + Map-route
+    // 4. Login + push + map route
     //--------------------------------------------------------------------
     withCredentials([string(credentialsId: pcfDeployCredentialId, variable: 'credentials')]) {
 
+        // CF Login
         sh """
             cf login --skip-ssl-validation \
-              -a '${pcfFoundation}' \
-              -u '${pcfDeployUserId}' \
-              -p '${credentials}' \
-              -o '${org}' \
-              -s '${pcfSpace}'
+                -a '${pcfFoundation}' \
+                -u '${pcfDeployUserId}' \
+                -p '${credentials}' \
+                -o '${org}' \
+                -s '${pcfSpace}'
         """
 
         println "INFO: Deploying ${appName}"
-        println "INFO: App Domain   = ${pcfDomain}"
-        println "INFO: Hostname     = ${hostname}"
-        println "INFO: Final URL    = https://${hostname}.${pcfDomain}"
+        println "INFO: Foundation API URL     = ${pcfFoundation}"
+        println "INFO: Route Domain (app.*)    = ${pcfDomain}"
+        println "INFO: Hostname                = ${hostname}"
+        println "INFO: Final URL: https://${hostname}.${pcfDomain}"
 
-        // Push without default route
+
+        //---------------------------------------------------------------
+        // Push without default route (required)
+        //---------------------------------------------------------------
         sh "cf push ${appName} --no-route"
 
-        // Map desired route
+
+        //---------------------------------------------------------------
+        // Map custom route (this creates your Storybook-style URL)
+        //---------------------------------------------------------------
         sh "cf map-route ${appName} ${pcfDomain} --hostname ${hostname}"
 
+
         println "INFO: Deployment successful!"
+        println "INFO: Application URL → https://${hostname}.${pcfDomain}"
     }
 }
+
 
 
