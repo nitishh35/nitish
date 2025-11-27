@@ -413,20 +413,23 @@ def call(def org, def pcfSpace, def pcfFoundation) {
     if (!appName) error "Unable to extract app name from manifest.yml"
 
     //--------------------------------------------------------------------
-    // Build domain & hostname
+    // Build domain and hostname
     //--------------------------------------------------------------------
     def pcfDomain = pcfFoundation.replace("api.sys.", "app.")
     def hostname  = "${appName}-qa"
+
     def CF = "/appbin/cf_cli/cf"
 
-    println "INFO: Final Route = https://${hostname}.${pcfDomain}"
+    println "INFO: Attempting final route:"
+    println "https://${hostname}.${pcfDomain}"
+
 
     //--------------------------------------------------------------------
-    // CF Login + Deploy using: push → create-route → map-route → start
+    // CF Login + push + create-route + map-route + start
     //--------------------------------------------------------------------
     withCredentials([string(credentialsId: pcfDeployCredentialId, variable: 'credentials')]) {
 
-        // LOGIN
+        // 1. LOGIN
         sh """
             ${CF} login \\
               --skip-ssl-validation \\
@@ -437,32 +440,31 @@ def call(def org, def pcfSpace, def pcfFoundation) {
               -s '${pcfSpace}'
         """
 
-        println "INFO: Using create-route + map-route approach"
-
-        // 1. push without route & without starting app
+        // 2. PUSH WITHOUT ROUTE + WITHOUT STARTING
         sh """
             ${CF} push ${appName} --no-route --no-start
         """
 
-        // 2. force create route under YOUR space
+        // 3. CREATE ROUTE (correct spacing before --hostname!!)
         sh """
             ${CF} create-route ${org} ${pcfDomain} --hostname ${hostname}
         """
 
-        // 3. map-route to app
+        // 4. MAP ROUTE
         sh """
             ${CF} map-route ${appName} ${pcfDomain} --hostname ${hostname}
         """
 
-        // 4. start app
+        // 5. START APP
         sh """
             ${CF} start ${appName}
         """
 
-        println "INFO: Deployment Successful!"
-        println "INFO: Application URL: https://${hostname}.${pcfDomain}"
+        println "INFO: Application deployed successfully!"
+        println "INFO: Final URL → https://${hostname}.${pcfDomain}"
     }
 }
+
 
 
 
