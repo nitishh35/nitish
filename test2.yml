@@ -465,6 +465,87 @@ def call(def org, def pcfSpace, def pcfFoundation) {
     }
 }
 
+======================================================================
+
+
+final code
+
+def call(def org, def pcfSpace, def pcfFoundation) {
+
+    def envProperty = loadEnvironmentProperties()
+    def pcfDeployUserId = envProperty.pcf_non_prod_deploy_user_id
+    def pcfDeployCredentialId = envProperty.pcf_non_prod_deploy_credential_id
+
+    //--------------------------------------------------------------------
+    // 1. Load CF CLI path from properties
+    //--------------------------------------------------------------------
+    def CF = envProperty.cf_cli_path
+    if (!CF) {
+        error "Missing property: cf_cli_path in pipeline-environment-config.properties"
+    }
+
+    //--------------------------------------------------------------------
+    // 2. Extract app name using readYaml
+    //--------------------------------------------------------------------
+    def manifest = readYaml file: "manifest.yml"
+    def appName = manifest.applications[0].name
+
+    if (!appName) {
+        error "Unable to extract app name from manifest.yml"
+    }
+
+    //--------------------------------------------------------------------
+    // 3. Build domain + hostname
+    //--------------------------------------------------------------------
+    def pcfDomain = pcfFoundation.replace("api.sys.", "app.")
+    def hostname  = "${appName}-qa"
+
+    println "INFO: CF CLI Path = ${CF}"
+    println "INFO: Final Route = https://${hostname}.${pcfDomain}"
+
+
+    //--------------------------------------------------------------------
+    // 4. CF login + push + create-route + map-route + start
+    //--------------------------------------------------------------------
+    withCredentials([string(credentialsId: pcfDeployCredentialId, variable: 'credentials')]) {
+
+        // LOGIN
+        sh """
+            ${CF} login \\
+              --skip-ssl-validation \\
+              -a '${pcfFoundation}' \\
+              -u '${pcfDeployUserId}' \\
+              -p '${credentials}' \\
+              -o '${org}' \\
+              -s '${pcfSpace}'
+        """
+
+        // PUSH WITHOUT ROUTE
+        sh """
+            ${CF} push ${appName} --no-route --no-start
+        """
+
+        // CREATE ROUTE (CF CLI v8 syntax)
+        sh """
+            ${CF} create-route ${pcfDomain} --hostname ${hostname}
+        """
+
+        // MAP ROUTE
+        sh """
+            ${CF} map-route ${appName} ${pcfDomain} --hostname ${hostname}
+        """
+
+        // START APP
+        sh """
+            ${CF} start ${appName}
+        """
+
+        println "INFO: Deployment successful!"
+        println "INFO: App URL: https://${hostname}.${pcfDomain}"
+    }
+}
+
+
 
 
 
