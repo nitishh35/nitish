@@ -382,6 +382,10 @@ def call(def org, def pcfSpace, def pcfFoundation) {
     }
 }
 
+cf create-domain RC-Digital-Solutions app.dev1.use1.pcf.syfbank.com
+cf create-domain RC-Digital-Solutions app.dev1.use2.pcf.syfbank.com
+
+
 
 
 
