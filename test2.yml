@@ -237,6 +237,10 @@ def call(def org, def pcfSpace, def pcfFoundation) {
         println "INFO: Application URL → https://${hostname}.${pcfDomain}"
     }
 }
+sh """
+    cf login --skip-ssl-validation -a '${pcfFoundation}' -u '${pcfDeployUserId}' -p '${credentials}' -o '${org}' -s '${pcfSpace}'
+"""
+
 
 
 
