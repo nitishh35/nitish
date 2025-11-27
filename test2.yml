@@ -154,3 +154,67 @@ def call(def org, def pcfSpace, def pcfFoundation) {
         println "INFO: Application URL: https://${uniqueHostname}.${pcfFoundationDomain}"
     }
 }
+----------------------------------------------
+
+
+date 27 -11
+
+
+def call(def org, def pcfSpace, def pcfFoundation) {
+
+    def envProperty = loadEnvironmentProperties()
+    def pcfDeployUserId = envProperty.pcf_non_prod_deploy_user_id
+    def pcfDeployCredentialId = envProperty.pcf_non_prod_deploy_credential_id
+
+    // 1) extract appName from manifest.yml (handles "name: foo" anywhere)
+    def appName = sh(
+        script: "grep -E '^\\s*name:\\s+' manifest.yml | awk '{print \$2; exit}'",
+        returnStdout: true
+    ).trim()
+
+    if (!appName) {
+        error "Unable to extract app name from manifest.yml"
+    }
+
+    // 2) determine appDomain:
+    // Only convert api.sys -> app for dev1.use1 and dev1.use2 foundations.
+    // For dev2.* foundations we keep pcfFoundation as-is (or you can add more rules).
+    def appDomain = pcfFoundation
+    if (pcfFoundation.toLowerCase().contains("dev1.use1") ||
+        pcfFoundation.toLowerCase().contains("dev1.use2")) {
+        appDomain = pcfFoundation.replace("api.sys", "app")
+    }
+
+    // hostname for QA route
+    def hostname = "${appName}-qa"
+
+    withCredentials([string(credentialsId: pcfDeployCredentialId, variable: 'credentials')]) {
+
+        // login
+        sh """
+            cf login --skip-ssl-validation \
+              -a '${pcfFoundation}' \
+              -u '${pcfDeployUserId}' \
+              -p '${credentials}' \
+              -o '${org}' \
+              -s '${pcfSpace}'
+        """
+
+        // push without creating any route
+        sh "cf push ${appName} --no-route"
+
+        // Check if route already exists for this app/domain/hostname
+        def routeCheck = sh(
+            script: "cf routes | awk '{print \$1\",\"\$2\",\"\$3}' | grep -E \"^${pcfSpace},${appDomain},${hostname}\$\" || true",
+            returnStdout: true
+        ).trim()
+
+        if (!routeCheck) {
+            // map the route
+            sh "cf map-route ${appName} ${appDomain} --hostname ${hostname}"
+        } else {
+            echo "Route already exists for ${hostname}.${appDomain} in space ${pcfSpace} - skipping map-route"
+        }
+    }
+}
+
