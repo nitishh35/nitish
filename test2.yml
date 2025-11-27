@@ -241,6 +241,73 @@ sh """
     cf login --skip-ssl-validation -a '${pcfFoundation}' -u '${pcfDeployUserId}' -p '${credentials}' -o '${org}' -s '${pcfSpace}'
 """
 
+==================================
+
+
+with cf push route
+
+def call(def org, def pcfSpace, def pcfFoundation) {
+
+    def envProperty = loadEnvironmentProperties()
+    def pcfDeployUserId = envProperty.pcf_non_prod_deploy_user_id
+    def pcfDeployCredentialId = envProperty.pcf_non_prod_deploy_credential_id
+
+    //--------------------------------------------------------------------
+    // 1. Extract app name from manifest.yml safely
+    //--------------------------------------------------------------------
+    def appName = sh(
+        script: """
+            grep -E '^[[:space:]]*-?[[:space:]]*name:' manifest.yml \
+            | head -1 \
+            | sed 's/.*name:[[:space:]]*//'
+        """,
+        returnStdout: true
+    ).trim()
+
+    if (!appName) {
+        error "Unable to extract app name from manifest.yml"
+    }
+
+    println "INFO: Extracted app name: ${appName}"
+
+
+    //--------------------------------------------------------------------
+    // 2. Convert ANY api.sys.* → app.*
+    //--------------------------------------------------------------------
+    def pcfDomain = pcfFoundation.replace("api.sys.", "app.")
+    def fullRoute = "${appName}.${pcfDomain}"
+
+
+    //--------------------------------------------------------------------
+    // 3. Login + cf push --route
+    //--------------------------------------------------------------------
+    withCredentials([string(credentialsId: pcfDeployCredentialId, variable: 'credentials')]) {
+
+        sh """
+            cf login \\
+                --skip-ssl-validation \\
+                -a '${pcfFoundation}' \\
+                -u '${pcfDeployUserId}' \\
+                -p '${credentials}' \\
+                -o '${org}' \\
+                -s '${pcfSpace}'
+        """
+
+        println "INFO: Deploying ${appName} using cf push --route"
+        println "INFO: Foundation API: ${pcfFoundation}"
+        println "INFO: App Domain    : ${pcfDomain}"
+        println "INFO: Route         : ${fullRoute}"
+
+        // 🚀 Push with custom route directly
+        sh """
+            cf push ${appName} \\
+              --route ${fullRoute}
+        """
+
+        println "INFO: Deployment successful!"
+        println "INFO: Final Application URL: https://${fullRoute}"
+    }
+}
 
 
 
