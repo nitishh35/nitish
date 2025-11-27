@@ -1,3 +1,5 @@
+Routes destinations must be in either the route's space or the route's shared spaces
+
 Based on your manifest file, here's the complete working code to fix the route conflict issue:
 
 ## 1. Updated `manifest.yml`
