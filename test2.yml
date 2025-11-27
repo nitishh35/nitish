@@ -387,6 +387,84 @@ def call(def org, def pcfSpace, def pcfFoundation) {
 cf create-domain RC-Digital-Solutions app.dev1.use1.pcf.syfbank.com
 cf create-domain RC-Digital-Solutions app.dev1.use2.pcf.syfbank.com
 
+==============================
+
+with imran approach
+
+
+def call(def org, def pcfSpace, def pcfFoundation) {
+
+    def envProperty = loadEnvironmentProperties()
+    def pcfDeployUserId = envProperty.pcf_non_prod_deploy_user_id
+    def pcfDeployCredentialId = envProperty.pcf_non_prod_deploy_credential_id
+
+    //--------------------------------------------------------------------
+    // Extract app name from manifest.yml
+    //--------------------------------------------------------------------
+    def appName = sh(
+        script: """
+            grep -E '^[[:space:]]*-?[[:space:]]*name:' manifest.yml \
+            | head -1 \
+            | sed 's/.*name:[[:space:]]*//'
+        """,
+        returnStdout: true
+    ).trim()
+
+    if (!appName) error "Unable to extract app name from manifest.yml"
+
+    //--------------------------------------------------------------------
+    // Build domain & hostname
+    //--------------------------------------------------------------------
+    def pcfDomain = pcfFoundation.replace("api.sys.", "app.")
+    def hostname  = "${appName}-qa"
+    def CF = "/appbin/cf_cli/cf"
+
+    println "INFO: Final Route = https://${hostname}.${pcfDomain}"
+
+    //--------------------------------------------------------------------
+    // CF Login + Deploy using: push → create-route → map-route → start
+    //--------------------------------------------------------------------
+    withCredentials([string(credentialsId: pcfDeployCredentialId, variable: 'credentials')]) {
+
+        // LOGIN
+        sh """
+            ${CF} login \\
+              --skip-ssl-validation \\
+              -a '${pcfFoundation}' \\
+              -u '${pcfDeployUserId}' \\
+              -p '${credentials}' \\
+              -o '${org}' \\
+              -s '${pcfSpace}'
+        """
+
+        println "INFO: Using create-route + map-route approach"
+
+        // 1. push without route & without starting app
+        sh """
+            ${CF} push ${appName} --no-route --no-start
+        """
+
+        // 2. force create route under YOUR space
+        sh """
+            ${CF} create-route ${org} ${pcfDomain} --hostname ${hostname}
+        """
+
+        // 3. map-route to app
+        sh """
+            ${CF} map-route ${appName} ${pcfDomain} --hostname ${hostname}
+        """
+
+        // 4. start app
+        sh """
+            ${CF} start ${appName}
+        """
+
+        println "INFO: Deployment Successful!"
+        println "INFO: Application URL: https://${hostname}.${pcfDomain}"
+    }
+}
+
+
 
 
 
