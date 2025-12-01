@@ -284,3 +284,47 @@ I can generate:
 Just tell me:
 
 👉 **“Give me a local test script”**
+
+
+    ---------------------------------------------
+
+updated the jenkinsfile
+
+================================
+    @Library([
+    'shared-libs@feature/EC-1037-notify-common-framework-teams-group-fix-fortify-team-alert-fix-test-automation'
+]) _
+
+pipeline {
+    agent any
+
+    stages {
+        stage('Load Properties') {
+            steps {
+                script {
+                    envProperty = loadEnvironmentProperties()
+                    echo "Properties Loaded"
+                }
+            }
+        }
+
+        stage('Trigger Global Counter Script') {
+            steps {
+                script {
+                    echo "Running updateGlobalCounterFile..."
+                    updateGlobalCounterFile("resetWithNotification")
+                }
+            }
+        }
+
+        stage('Trigger Teams Notification Manually') {
+            steps {
+                script {
+                    echo "Calling notifyTeamsChannel() directly"
+                    notifyTeamsChannel()
+                }
+            }
+        }
+    }
+}
+
