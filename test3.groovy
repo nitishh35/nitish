@@ -206,3 +206,66 @@ def notifyTeam(def payloadJson, def webhookUrl) {
 
     println "INFO: Teams response code: ${responseCode}"
 }
+
+==================================
+
+
+    def getProductWorkflowChannelUrl() {
+
+    def content = libraryResource('pipeline-global-config/workflow-urls.properties')
+    def props   = readProperties text: content
+    def buildUrl = env.BUILD_URL ?: ""
+
+    println "INFO: Resolving product name for URL:"
+    println buildUrl
+
+    String productName = null
+
+    // -----------------------
+    // Case A: API-Products
+    // -----------------------
+    def apiMatcher = buildUrl =~ /\/job\/API-Products\/job\/([^\/]+)\//
+    if (apiMatcher.find()) {
+        productName = apiMatcher.group(1)
+        println "INFO: API-Products match → ${productName}"
+    }
+
+    // -----------------------
+    // Case B: Common-Framework WITH subfolder
+    // /job/Common-Framework/job/<subfolder>/job/<job>/
+    // -----------------------
+    if (!productName) {
+        def cfMatcherSub = buildUrl =~ /\/job\/Common-Framework\/job\/([^\/]+)\/job\//
+        if (cfMatcherSub.find()) {
+            productName = "Common-Framework"   // Always use main key
+            println "INFO: Common-Framework subfolder match"
+        }
+    }
+
+    // -----------------------
+    // Case C: Common-Framework WITHOUT subfolder
+    // /job/Common-Framework/job/<job>/
+    // -----------------------
+    if (!productName) {
+        def cfMatcherDirect = buildUrl =~ /\/job\/Common-Framework\/job\/([^\/]+)\//
+        if (cfMatcherDirect.find()) {
+            productName = "Common-Framework"
+            println "INFO: Direct Common-Framework job match"
+        }
+    }
+
+    if (!productName) {
+        println "WARN: No matching product key found for this URL"
+        return null
+    }
+
+    def url = props[productName]
+    if (!url) {
+        println "WARN: No webhook found for key = ${productName}"
+        return null
+    }
+
+    println "INFO: Using Teams webhook key = ${productName}"
+    return url
+}
+
