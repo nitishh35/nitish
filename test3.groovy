@@ -74,452 +74,146 @@ def createEmailJson(def addressList) {
         ==============================================
 
 
-        sendteamnotification 
-
-Below is the **FULL, CLEAN, READY-TO-USE, FINAL** version of
-✅ `sendTeamNotification.groovy`
-with the **exact logic you asked for**:
-
----
-
-# 🎯 **Final Requirements Implemented**
-
-### ✔ API-Products → Use INDIVIDUAL webhook per job
-
-from `workflow-urls.properties`, example:
-
-```
-Alerts=URL1
-CustID=URL2
-PayMyBill=URL3
-```
-
-### ✔ Common-Framework → Use ONE GLOBAL webhook
-
-always use:
-
-```
-Common-Framework=URL_COMMON
-```
-
-### ✔ Support both folder structures
-
-* `/API-Products/job/<JobName>/`
-* `/Common-Framework/job/<SubFolder>/job/<JobName>/`
-
-### ✔ Suppress service accounts
-
-### ✔ Proper JSON escaping
-
-### ✔ Clean error handling
-
-### ✔ Works with CloudBees / Jenkins Shared Library
-
----
-
-# 🚀 **FINAL `sendTeamNotification.groovy` (PASTE THIS INTO SHARED LIB)**
-
-```groovy
-#!/usr/bin/env groovy
+       import groovy.json.JsonOutput
 
 def call() {
-
     try {
-        def buildStatus = currentBuild.result ?: "SUCCESS"
-        def stageName   = env.failedStage ?: "NA"
 
-        // Get triggered user info
+        def buildStatus = currentBuild.result
+        def stageName = "NA"
+
+        if (currentBuild.result?.equalsIgnoreCase("FAILURE")) {
+            stageName = env.failedStage
+        }
+
+        // Get who triggered the build
         def userInfo = getBuildTriggeredUserDetails()
-        def userEmail = userInfo.userEmail
-        def userName  = userInfo.userName
+        def buildTriggeredUserEmailId = userInfo.userEmail
+        def buildTriggeredUserName = userInfo.userName
 
-        // Skip SVC accounts
-        if (userName?.startsWith("SVC-")) {
-            println "INFO: Notification suppressed for service account user: ${userName}"
+        // Skip service accounts (original logic preserved)
+        if (buildTriggeredUserName?.startsWith('SVC-APP-RLCT')) {
+            println "INFO: Notification suppressed for service account user: ${buildTriggeredUserName}"
             return
         }
 
-        // Build payload
-        def data = [
-            pipelineURL      : env.BUILD_URL,
-            triggerdBy       : userName,
-            triggerdByEmail  : userEmail,
-            status           : buildStatus,
-            stage            : (buildStatus == "FAILURE" ? stageName : "NA")
-        ]
+        // Build JSON payload
+        def buildData = [:]
+        buildData["pipelineURL"]      = env.BUILD_URL
+        buildData["triggerdBy"]       = buildTriggeredUserName
+        buildData["triggerdByEmail"]  = buildTriggeredUserEmailId
+        buildData["status"]           = buildStatus
 
-        def payload = groovy.json.JsonOutput.toJson(data)
+        if (buildStatus == "FAILURE") {
+            buildData["stage"] = stageName
+        } else if (buildStatus in ["SUCCESS", "ABORTED", "UNSTABLE"]) {
+            buildData["stage"] = "NA"
+        }
 
-        // Resolve Teams webhook URL
+        def buildDataJson = JsonOutput.toJson(buildData)
+
+        // Resolve the Teams webhook
         def channelUrl = getProductWorkflowChannelUrl()
-
-        if (!channelUrl) {
-            println "WARN: No Teams webhook found for this job. Skipping notification."
-            return
+        if (channelUrl) {
+            notifyTeam(buildDataJson, channelUrl)
+        } else {
+            println "WARN: No channel URL resolved; skipping notifyTeam()"
         }
 
-        // Send notification
-        notifyTeam(payload, channelUrl)
-
-    } catch (Exception ex) {
-        println "ERROR: Failed to send Teams notification: ${ex.message}"
+    } catch (Exception e) {
+        println "ERROR: Failed to send Teams notification: ${e.message}"
     }
 }
-```
 
----
+///////////////////////////////////////////////////////////////////////////
+//  DYNAMIC PRODUCT → WEBHOOK RESOLUTION
+///////////////////////////////////////////////////////////////////////////
 
-# 🔍 **URL Resolver Logic**
-
-### (Supports API-Products + Common-Framework)
-
-```groovy
 def getProductWorkflowChannelUrl() {
 
     def content = libraryResource('pipeline-global-config/workflow-urls.properties')
-    def props   = readProperties(text: content)
+    def props   = readProperties text: content
     def buildUrl = env.BUILD_URL ?: ""
 
-    println "INFO: Resolving Teams webhook for build URL:"
+    println "\nINFO: Resolving Teams webhook for Build URL:"
     println buildUrl
 
-    // API-Products → 2-level folder
+    ///////////////////////////////////////////////////////////////////////////
+    // 1) API-PRODUCTS (UNCHANGED)
+    ///////////////////////////////////////////////////////////////////////////
     def apiMatcher = buildUrl =~ /\/job\/API-Products\/job\/([^\/]+)\//
-
-    // Common-Framework → 3-level folder
-    def cfMatcher  = buildUrl =~ /\/job\/Common-Framework\/job\/([^\/]+)\/job\/([^\/]+)\//
-
-    String key = null
-
-    // ---------------------------------------------
-    // CASE 1: API-PRODUCTS (individual job mappings)
-    // ---------------------------------------------
     if (apiMatcher.find()) {
-        String jobName = apiMatcher.group(1)
-        println "INFO: API-Products job detected → ${jobName}"
-        key = jobName
-    }
 
-    // -----------------------------------------------------
-    // CASE 2: COMMON-FRAMEWORK (always use single webhook)
-    // -----------------------------------------------------
-    else if (cfMatcher.find()) {
+        def productName = apiMatcher.group(1)
+        println "INFO: Detected API-Products job → ${productName}"
 
-        String subfolder = cfMatcher.group(1)
-        String jobName   = cfMatcher.group(2)
+        def channelUrl = props[productName]
+        if (channelUrl) {
+            return channelUrl
+        }
 
-        println "INFO: Common-Framework job detected"
-        println "INFO: → Subfolder: ${subfolder}"
-        println "INFO: → Job: ${jobName}"
-
-        // ALWAYS use single common key
-        key = "Common-Framework"
-    }
-
-    else {
-        println "WARN: Unable to detect product from URL: ${buildUrl}"
+        println "WARN: No webhook found for API-Products folder '${productName}'"
         return null
     }
 
-    def url = props[key]
+    ///////////////////////////////////////////////////////////////////////////
+    // 2) COMMON-FRAMEWORK (ENHANCED WITH DYNAMIC SUBFOLDER SUPPORT)
+    ///////////////////////////////////////////////////////////////////////////
+    def cfMatcher = buildUrl =~ /\/job\/Common-Framework\/job\/([^\/]+)\/job\/([^\/]+)\//
+    if (cfMatcher.find()) {
 
-    if (!url) {
-        println "WARN: No webhook URL found for key '${key}' in workflow-urls.properties"
+        def subfolder = cfMatcher.group(1)
+        def jobName   = cfMatcher.group(2)
+
+        println "INFO: Detected Common-Framework job"
+        println "INFO:   Subfolder = ${subfolder}"
+        println "INFO:   Job       = ${jobName}"
+
+        // Try dynamic per-subfolder key: Common-Framework.<subfolder>
+        def subKey = "Common-Framework.${subfolder}"
+
+        if (props[subKey]) {
+            println "INFO: Using subfolder-specific webhook → ${subKey}"
+            return props[subKey]
+        }
+
+        // Fallback to default Common-Framework channel
+        if (props["Common-Framework"]) {
+            println "INFO: Using default Common-Framework webhook"
+            return props["Common-Framework"]
+        }
+
+        println "WARN: No webhook configured for '${subKey}' or 'Common-Framework'"
         return null
     }
 
-    println "INFO: Mapped to webhook key = ${key}"
-    return url
+    ///////////////////////////////////////////////////////////////////////////
+    // 3) NOTHING MATCHED → SKIP ALERTS
+    ///////////////////////////////////////////////////////////////////////////
+    println "WARN: Did not match API-Products or Common-Framework structure; skipping notifications."
+    return null
 }
-```
 
----
+///////////////////////////////////////////////////////////////////////////
+//  CURL HANDLER (ORIGINAL LOGIC PRESERVED)
+///////////////////////////////////////////////////////////////////////////
 
-# 📤 **Curl Handler (Clean + Safe)**
+def notifyTeam(def buildDataJson, def channelUrl) {
 
-```groovy
-def notifyTeam(String jsonPayload, String webhookUrl) {
+    // Make JSON shell-safe
+    def safePayload = buildDataJson.replace("'", "'\"'\"'")
 
-    println "INFO: Sending Teams notification..."
-    println "INFO: Teams Webhook → ${webhookUrl}"
-
-    def httpResponse = sh(
+    def responseCode = sh(
         script: """
             curl -k -w '%{http_code}' \
                  -H 'Content-Type: application/json' \
                  -H 'Accept: application/json' \
-                 -X POST '${webhookUrl}' \
-                 -d '${jsonPayload.replace("'", "'\\\\''")}'
+                 -X POST '${channelUrl}' \
+                 -d '${safePayload}'
         """,
         returnStdout: true
     ).trim()
 
-    println "INFO: Teams webhook response: ${httpResponse}"
+    println "INFO: Teams Webhook Response Code: ${responseCode}"
+    return responseCode
 }
-```
-
----
-
-# 👤 Fallback for Missing User Info
-
-```groovy
-def getBuildTriggeredUserDetails() {
-    return [
-        userEmail : env.BUILD_USER_EMAIL ?: "unknown",
-        userName  : env.BUILD_USER ?: "unknown"
-    ]
-}
-```
-
----
-
-# 🎉 **You Now Have the FULL WORKING IMPLEMENTATION**
-
-This code is:
-
-### ✔ Complete
-
-### ✔ Clean
-
-### ✔ Tested against real Jenkins patterns
-
-### ✔ Works with your workflow-urls.properties
-
-### ✔ Implements your manager’s exact requirement
-
----
-
-# 👉 If you want, I can also generate:
-
-### 🔹 Proper `workflow-urls.properties` template
-
-### 🔹 A POC Jenkins job for Common-Framework
-
-### 🔹 A POC job for API-Products
-
-### 🔹 Logging enhancement version
-
-### 🔹 Unit-test version for shared library
-
-Just tell me:
-**“Give me POC job for Common-Framework”** or
-**“Generate workflow-urls.properties template”**
-=================================================
-
-
-    jenkins job to test
-
-Perfect — here is a **clean, simple, 100% working POC Jenkins pipeline** that you can use to test both:
-
-### ✅ API-Products folder
-
-### ✅ Common-Framework folder
-
-You will run **the SAME Jenkinsfile** in both locations:
-
-```
-/dse-microservices-dev/API-Products/<AnyJob>/Jenkinsfile
-/dse-microservices-dev/Common-Framework/<AnySubFolder>/<AnyJob>/Jenkinsfile
-```
-
-This POC will:
-
-* Simulate SUCCESS or FAILURE
-* Populate `env.failedStage`
-* Trigger your full `sendTeamNotification.groovy`
-* Display folder + job detection logs
-* Allow testing of both:
-
-  * **Individual job-based webhooks** (API-Products)
-  * **Single global webhook** (Common-Framework)
-
----
-
-# 🚀 **POC Jenkinsfile (Works for BOTH folder types)**
-
-👉 Copy this entire Jenkinsfile into any test job under **API-Products** or **Common-Framework**.
-
-```groovy
-@Library([
-    'shared-libs@feature/EC-1037-notify-common-framework-teams-group-fix-fortify-team-alert-fix-test-automation',
-    'shared-libs-builds@feature/EC-1037-notify-common-framework-teams-group-fix-fortify-team-alert-fix-test-automation',
-    'shared-libs-config@feature/EC-1037-notify-common-framework-teams-group-fix-fortify-team-alert-fix-test-automation',
-    'shared-libs-deploy@feature/EC-1037-notify-common-framework-teams-group-fix-fortify-team-alert-fix-test-automation',
-    'shared-libs-git-utils@feature/EC-1037-notify-common-framework-teams-group-fix-fortify-team-alert-fix-test-automation',
-    'shared-libs-scan@feature/EC-1037-notify-common-framework-teams-group-fix-fortify-team-alert-fix-test-automation',
-    'shared-libs-test-automation@feature/EC-1037-notify-common-framework-teams-group-fix-fortify-team-alert-fix-test-automation',
-    'shared-libs-utility@feature/EC-1037-notify-common-framework-teams-group-fix-fortify-team-alert-fix-test-automation',
-    'shared-libs-validate@feature/EC-1037-notify-common-framework-teams-group-fix-fortify-team-alert-fix-test-automation'
-]) _
-
-node(env.dse_worker_node) {
-
-    ansiColor('xterm') {
-
-        try {
-
-            stage('POC: Start') {
-                echo "============ POC Notification Test Started ============"
-                echo "BUILD URL: ${env.BUILD_URL}"
-            }
-
-            stage('POC: Simulate Result') {
-                script {
-                    // Random SUCCESS or FAILURE
-                    def result = new Random().nextInt(2)
-
-                    if (result == 0) {
-                        currentBuild.result = "SUCCESS"
-                        env.failedStage = "NA"
-                        echo "Simulating SUCCESS"
-                    } else {
-                        currentBuild.result = "FAILURE"
-                        env.failedStage = "POC-Failure-Stage"
-                        echo "Simulating FAILURE"
-                    }
-                }
-            }
-
-        } catch (err) {
-            echo "POC Error: ${err.message}"
-            currentBuild.result = "FAILURE"
-
-        } finally {
-
-            echo "============ Triggering sendTeamNotification() ============"
-            sendTeamNotification()
-
-            echo "============ POC Completed ============"
-        }
-    }
-}
-```
-
----
-
-# 📌 **How to Test API-Products Folder**
-
-1. Go to:
-
-   ```
-   /dse-microservices-dev/API-Products/
-   ```
-
-2. Create a job:
-
-   ```
-   API-Products → Alerts-POC
-   ```
-
-3. Add the Jenkinsfile above.
-
-4. Ensure your workflow-urls.properties contains:
-
-   ```
-   Alerts-POC=https://teams-webhook-for-alerts-poc
-   ```
-
-5. Run the build → You should see:
-
-```
-INFO: API-Products job detected → Alerts-POC
-```
-
-Teams notification will use an **individual webhook key**.
-
----
-
-# 📌 **How to Test Common-Framework Folder**
-
-1. Go to:
-
-   ```
-   /dse-microservices-dev/Common-Framework/Ecom-API-Common/
-   ```
-
-2. Create a job:
-
-   ```
-   Common-Framework → Ecom-API-Common → CF-POC
-   ```
-
-3. Add the Jenkinsfile above.
-
-4. Add this single entry to workflow-urls.properties:
-
-   ```
-   Common-Framework=https://teams-webhook-for-common-framework
-   ```
-
-5. Run the build → You should see:
-
-```
-INFO: Common-Framework job detected
-INFO: → Subfolder: Ecom-API-Common
-INFO: → Job: CF-POC
-```
-
-Teams notification will use **Common-Framework key only**.
-
----
-
-# 🎯 **Verification Steps**
-
-| Folder Type      | Expected Behavior             | Webhook Key Used                |
-| ---------------- | ----------------------------- | ------------------------------- |
-| API-Products     | Each job gets its OWN webhook | Alerts, CustID, PayMyBill, etc. |
-| Common-Framework | ALL jobs use ONE webhook      | Common-Framework                |
-
----
-
-# 🚀 If you want, I can also provide:
-
-### 🔹 A pipeline that forces only SUCCESS
-
-### 🔹 A pipeline that forces only FAILURE
-
-### 🔹 A pipeline that tests *all* keys in workflow-urls.properties
-
-### 🔹 A multi-branch version
-
-Just tell me **which version you want next.**
-
-=========================================
-
-    date 2/12
-
-
- stage('notify: POC Test') {
-                    logStage('notify-poc-test') {
-
-                        echo "Running POC to test Common-Framework Teams Notification..."
-
-                        // simulate failure or success
-                        currentBuild.result = "SUCCESS"    // change to FAILURE to test failure payload
-                        env.failedStage = "POC-SIMULATED-STAGE"
-
-                        // CALL YOUR SHARED LIB METHOD
-                        sendTeamNotification()
-                    }
-                }
-
-            } // timeout
-
-            buildSuccess()
-
-        } catch (err) {
-
-            handleBuildFailure(err)
-
-        } finally {
-
-            if (currentBuild.result == 'FAILURE') {
-                handleFailure()
-            }
-
-            // ALWAYS send the closing notification
-            sendTeamNotification()
-        }
-    }
-
-      
