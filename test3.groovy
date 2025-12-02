@@ -484,6 +484,42 @@ Teams notification will use **Common-Framework key only**.
 
 Just tell me **which version you want next.**
 
+=========================================
 
+    date 2/12
+
+
+ stage('notify: POC Test') {
+                    logStage('notify-poc-test') {
+
+                        echo "Running POC to test Common-Framework Teams Notification..."
+
+                        // simulate failure or success
+                        currentBuild.result = "SUCCESS"    // change to FAILURE to test failure payload
+                        env.failedStage = "POC-SIMULATED-STAGE"
+
+                        // CALL YOUR SHARED LIB METHOD
+                        sendTeamNotification()
+                    }
+                }
+
+            } // timeout
+
+            buildSuccess()
+
+        } catch (err) {
+
+            handleBuildFailure(err)
+
+        } finally {
+
+            if (currentBuild.result == 'FAILURE') {
+                handleFailure()
+            }
+
+            // ALWAYS send the closing notification
+            sendTeamNotification()
+        }
+    }
 
       
