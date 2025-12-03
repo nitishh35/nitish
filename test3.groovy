@@ -350,46 +350,46 @@ import hudson.model.Cause
 
 def call() {
 
+    // 1. Direct UserIdCause (user manually triggered job)
     def buildCause = currentBuild.rawBuild.getCause(Cause.UserIdCause)
-
-    // WHEN DOWNSTREAM JOB IS TRIGGERED → buildCause IS NULL
-    if (buildCause == null) {
-
-        // Try to extract user from upstream cause
-        def upstreamCause = currentBuild.rawBuild.getCause(Cause.UpstreamCause)
-
-        if (upstreamCause != null) {
-            def upstreamBuild = upstreamCause.getUpstreamRun()
-
-            if (upstreamBuild != null) {
-                def upstreamUserCause = upstreamBuild.getCause(Cause.UserIdCause)
-
-                if (upstreamUserCause != null) {
-                    buildCause = upstreamUserCause
-                }
-            }
-        }
+    if (buildCause != null) {
+        def userId = buildCause.getUserId()
+        def userData = User.get(userId)
+        def mailProp = userData.getProperty(Mailer.UserProperty.class)
+        return [
+            userName : userData.getDisplayName(),
+            userEmail: mailProp?.getAddress() ?: "unknown"
+        ]
     }
 
-    // STILL NULL? → Use SYSTEM
-    if (buildCause == null) {
+    // 2. DOWNSTREAM JOB → UpstreamCause (NO restricted API calls)
+    def upstreamCause = currentBuild.rawBuild.getCause(Cause.UpstreamCause)
+    if (upstreamCause != null) {
+
+        // Extract user from shortDescription (sandbox safe)
+        // Example string:
+        // "Started by upstream project "JobName" build #23 by user John Doe"
+        def desc = upstreamCause.getShortDescription()
+
+        def matcher = desc =~ /by user (.+)$/
+        if (matcher.find()) {
+            def detectedUser = matcher.group(1).trim()
+            return [
+                userName : detectedUser,
+                userEmail: "unknown"
+            ]
+        }
+
+        // Fallback when no user present
         return [
             userName : "SYSTEM",
             userEmail: "system@local"
         ]
     }
 
-    def userId = buildCause.getUserId()
-    def userData = User.get(userId)
-
-    def mailProp = userData.getProperty(Mailer.UserProperty.class)
-    def userEmail = mailProp?.getAddress() ?: null
-
-    def userName = userData.getDisplayName()
-
+    // 3. FALLBACK for cron triggers, git triggers etc.
     return [
-        userName : userName,
-        userEmail: userEmail
+        userName : "SYSTEM",
+        userEmail: "system@local"
     ]
 }
-
