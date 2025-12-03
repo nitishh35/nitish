@@ -340,4 +340,56 @@ def notifyTeam(def buildDataJson, def channelUrl) {
     println "INFO: The received HTTP response code from DevOps teams channel curl request: ${responseCode}"
 }
 
+======================================
+
+    getbuildtriggereduserdetails
+
+import hudson.tasks.Mailer
+import hudson.model.User
+import hudson.model.Cause
+
+def call() {
+
+    def buildCause = currentBuild.rawBuild.getCause(Cause.UserIdCause)
+
+    // WHEN DOWNSTREAM JOB IS TRIGGERED → buildCause IS NULL
+    if (buildCause == null) {
+
+        // Try to extract user from upstream cause
+        def upstreamCause = currentBuild.rawBuild.getCause(Cause.UpstreamCause)
+
+        if (upstreamCause != null) {
+            def upstreamBuild = upstreamCause.getUpstreamRun()
+
+            if (upstreamBuild != null) {
+                def upstreamUserCause = upstreamBuild.getCause(Cause.UserIdCause)
+
+                if (upstreamUserCause != null) {
+                    buildCause = upstreamUserCause
+                }
+            }
+        }
+    }
+
+    // STILL NULL? → Use SYSTEM
+    if (buildCause == null) {
+        return [
+            userName : "SYSTEM",
+            userEmail: "system@local"
+        ]
+    }
+
+    def userId = buildCause.getUserId()
+    def userData = User.get(userId)
+
+    def mailProp = userData.getProperty(Mailer.UserProperty.class)
+    def userEmail = mailProp?.getAddress() ?: null
+
+    def userName = userData.getDisplayName()
+
+    return [
+        userName : userName,
+        userEmail: userEmail
+    ]
+}
 
