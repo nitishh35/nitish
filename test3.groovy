@@ -78,8 +78,6 @@ def createEmailJson(def addressList) {
 
 
 
-import groovy.json.JsonOutput
-
 def call() {
 
     try {
@@ -106,7 +104,8 @@ def call() {
             stage           : (buildStatus == "FAILURE" ? stageName : "NA")
         ]
 
-        def jsonPayload = JsonOutput.toJson(data)
+        // Convert Map → JSON
+        def jsonPayload = writeJSON returnText: true, json: data
 
         // Find webhook URL based on job folder
         def channelUrl = getProductWorkflowChannelUrl()
@@ -116,7 +115,7 @@ def call() {
             return
         }
 
-        // Send Teams Notification
+        // Send teams notification
         notifyTeam(jsonPayload, channelUrl)
 
     } catch (Exception e) {
@@ -139,19 +138,14 @@ def getProductWorkflowChannelUrl() {
 
     String productKey = null
 
-    //-------------------------------------------------------------------
     // CASE 1 → API-Products jobs
-    //-------------------------------------------------------------------
     def apiMatcher = buildUrl =~ /\/job\/API-Products\/job\/([^\/]+)\//
     if (apiMatcher.find()) {
         productKey = apiMatcher.group(1)
         println "INFO: API-Products detected → ${productKey}"
     }
 
-    //-------------------------------------------------------------------
-    // CASE 2 → Common-Framework (subfolder case)
-    // /job/Common-Framework/job/<subfolder>/job/<job>
-    //-------------------------------------------------------------------
+    // CASE 2 → Common-Framework (subfolder)
     if (!productKey) {
         def cfMatcherSub = buildUrl =~ /\/job\/Common-Framework\/job\/([^\/]+)\/job\//
         if (cfMatcherSub.find()) {
@@ -160,10 +154,7 @@ def getProductWorkflowChannelUrl() {
         }
     }
 
-    //-------------------------------------------------------------------
     // CASE 3 → Common-Framework (direct job)
-    // /job/Common-Framework/job/<job>
-    //-------------------------------------------------------------------
     if (!productKey) {
         def cfMatcherDirect = buildUrl =~ /\/job\/Common-Framework\/job\/([^\/]+)\//
         if (cfMatcherDirect.find()) {
@@ -172,17 +163,13 @@ def getProductWorkflowChannelUrl() {
         }
     }
 
-    //-------------------------------------------------------------------
     // No folder matched
-    //-------------------------------------------------------------------
     if (!productKey) {
         println "WARN: No capability folder detected. Notification skipped."
         return null
     }
 
-    //-------------------------------------------------------------------
     // Lookup webhook URL in workflow-urls.properties
-    //-------------------------------------------------------------------
     def webhookUrl = props[productKey]
 
     if (!webhookUrl) {
@@ -214,5 +201,3 @@ def notifyTeam(String jsonPayload, String webhookUrl) {
 
     println "INFO: Teams webhook response code: ${httpResponse}"
 }
-
-
