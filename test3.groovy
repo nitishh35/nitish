@@ -346,11 +346,10 @@ def notifyTeam(def buildDataJson, def channelUrl) {
 
 def call() {
 
-    // Get ALL causes in a sandbox-safe way
-    def allCauses = currentBuild.getBuildCauses()
+    def causes = currentBuild.getBuildCauses()
 
-    // 1. USER TRIGGERED (manual build)
-    def userCause = allCauses.find { it._class == "hudson.model.Cause$UserIdCause" }
+    // 1. User manually triggered the job
+    def userCause = causes.find { it._class?.endsWith("UserIdCause") }
     if (userCause) {
         return [
             userName : userCause.userName ?: "UNKNOWN",
@@ -358,11 +357,11 @@ def call() {
         ]
     }
 
-    // 2. UPSTREAM TRIGGERED (downstream build)
-    def upstreamCause = allCauses.find { it._class == "hudson.model.Cause$UpstreamCause" }
+    // 2. Upstream job triggered this job
+    def upstreamCause = causes.find { it._class?.endsWith("UpstreamCause") }
     if (upstreamCause) {
 
-        // Some controllers provide userName directly in cause map
+        // Some Jenkins controllers populate upstream user
         if (upstreamCause.upstreamUser) {
             return [
                 userName : upstreamCause.upstreamUser,
@@ -370,14 +369,14 @@ def call() {
             ]
         }
 
-        // If no user info passed → fallback
+        // Otherwise return SYSTEM
         return [
             userName : "SYSTEM",
             userEmail: "system@local"
         ]
     }
 
-    // 3. SCM TRIGGER / TIMER TRIGGER / UNKNOWN
+    // 3. Timer / SCM / Unknown
     return [
         userName : "SYSTEM",
         userEmail: "system@local"
