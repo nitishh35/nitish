@@ -382,3 +382,21 @@ def call() {
         userEmail: "system@local"
     ]
 }
+=====================
+
+    Scripts not permitted to use method hudson.model.Cause$UpstreamCause getUpstreamRun
+Scripts not permitted to use method hudson.model.User get
+Scripts not permitted to use method hudson.tasks.Mailer$UserProperty getAddress
+Scripts not permitted to use method hudson.model.Cause getShortDescription
+====================
+
+
+    method hudson.model.Cause$UpstreamCause getUpstreamRun
+method hudson.model.Cause$UpstreamCause getUpstreamBuild
+method hudson.model.Cause$UpstreamCause getUpstreamProject
+method hudson.model.Cause getShortDescription
+method hudson.model.User get
+method hudson.tasks.Mailer$UserProperty getAddress
+method hudson.model.User getDisplayName
+method hudson.model.Cause$UserIdCause getUserId
+method hudson.model.AbstractBuild getCause
