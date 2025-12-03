@@ -344,50 +344,40 @@ def notifyTeam(def buildDataJson, def channelUrl) {
 
     getbuildtriggereduserdetails
 
-import hudson.tasks.Mailer
-import hudson.model.User
-import hudson.model.Cause
-
 def call() {
 
-    // 1. Direct UserIdCause (user manually triggered job)
-    def buildCause = currentBuild.rawBuild.getCause(Cause.UserIdCause)
-    if (buildCause != null) {
-        def userId = buildCause.getUserId()
-        def userData = User.get(userId)
-        def mailProp = userData.getProperty(Mailer.UserProperty.class)
+    // Get ALL causes in a sandbox-safe way
+    def allCauses = currentBuild.getBuildCauses()
+
+    // 1. USER TRIGGERED (manual build)
+    def userCause = allCauses.find { it._class == "hudson.model.Cause$UserIdCause" }
+    if (userCause) {
         return [
-            userName : userData.getDisplayName(),
-            userEmail: mailProp?.getAddress() ?: "unknown"
+            userName : userCause.userName ?: "UNKNOWN",
+            userEmail: userCause.userEmail ?: "unknown"
         ]
     }
 
-    // 2. DOWNSTREAM JOB → UpstreamCause (NO restricted API calls)
-    def upstreamCause = currentBuild.rawBuild.getCause(Cause.UpstreamCause)
-    if (upstreamCause != null) {
+    // 2. UPSTREAM TRIGGERED (downstream build)
+    def upstreamCause = allCauses.find { it._class == "hudson.model.Cause$UpstreamCause" }
+    if (upstreamCause) {
 
-        // Extract user from shortDescription (sandbox safe)
-        // Example string:
-        // "Started by upstream project "JobName" build #23 by user John Doe"
-        def desc = upstreamCause.getShortDescription()
-
-        def matcher = desc =~ /by user (.+)$/
-        if (matcher.find()) {
-            def detectedUser = matcher.group(1).trim()
+        // Some controllers provide userName directly in cause map
+        if (upstreamCause.upstreamUser) {
             return [
-                userName : detectedUser,
+                userName : upstreamCause.upstreamUser,
                 userEmail: "unknown"
             ]
         }
 
-        // Fallback when no user present
+        // If no user info passed → fallback
         return [
             userName : "SYSTEM",
             userEmail: "system@local"
         ]
     }
 
-    // 3. FALLBACK for cron triggers, git triggers etc.
+    // 3. SCM TRIGGER / TIMER TRIGGER / UNKNOWN
     return [
         userName : "SYSTEM",
         userEmail: "system@local"
