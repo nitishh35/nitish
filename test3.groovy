@@ -210,5 +210,65 @@ def notifyTeam(String jsonPayload, String webhookUrl) {
 
     println "INFO: Teams webhook response code: ${httpResponse}"
 }
+------------------------------------------------------------------------------
+
+    update code as per syf code for sendteamsnotification
+
+def getProductWorkflowChannelUrl() {
+
+    def content = libraryResource('pipeline-global-config/workflow-urls.properties')
+    def props = readProperties text: content
+
+    def buildUrl = env.BUILD_URL ?: ""
+
+    // MATCH API-PRODUCTS
+    def matcher = buildUrl =~ /\/job\/API-Products\/job\/([^\/]+)/
+
+    def productName = ""
+
+    if (matcher.find()) {
+        productName = matcher.group(1)
+        println "INFO: API-Products detected → ${productName}"
+    } 
+    else {
+
+        // -------------------------------------------
+        // ADDING COMMON-FRAMEWORK (SUBFOLDER) SUPPORT
+        // -------------------------------------------
+        def cfSubFolder = buildUrl =~ /\/job\/Common-Framework\/job\/([^\/]+)\/job\//
+        if (cfSubFolder.find()) {
+            productName = "Common-Framework"
+            println "INFO: Common-Framework detected (subfolder)"
+        }
+
+        // -------------------------------------------
+        // ADDING COMMON-FRAMEWORK (DIRECT JOB) SUPPORT
+        // -------------------------------------------
+        if (!productName) {
+            def cfDirect = buildUrl =~ /\/job\/Common-Framework\/job\/([^\/]+)\//
+            if (cfDirect.find()) {
+                productName = "Common-Framework"
+                println "INFO: Common-Framework detected (direct)"
+            }
+        }
+
+        // -------------------------------------------
+        // NOTHING MATCHED
+        // -------------------------------------------
+        if (!productName) {
+            println "WARN: Skipping team notification for this build, unable to extract the capability folder name from the URL: ${buildUrl}"
+            return null
+        }
+    }
+
+    def channelUrl = props[productName]
+
+    if (!channelUrl) {
+        println "WARN: No webhook configured for key '${productName}'"
+        return null
+    }
+
+    return channelUrl
+}
 
 
