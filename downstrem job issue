@@ -1,0 +1,295 @@
+Yes — you **CAN** trigger the downstream job using:
+✔ a **choice parameter**,
+✔ a **boolean parameter**,
+✔ a **string parameter**,
+✔ or **any other pipeline logic**
+
+**BUT** the important part is this:
+
+---
+
+# ⭐ **The actual call to `passUserToDownstream()` MUST run inside the UPSTREAM pipeline — not downstream.**
+
+You can *control when it runs*, but **it must run in the upstream job**, because that’s where the user identity exists.
+
+---
+
+# ✅ OPTION 1 — USE A CHOICE PARAMETER (YES, YOU CAN)
+
+### Upstream job Jenkinsfile:
+
+```groovy
+parameters {
+    choice(
+        name: 'RUN_DOWNSTREAM',
+        choices: ['NO', 'YES'],
+        description: 'Do you want to trigger the downstream job?'
+    )
+}
+```
+
+### Then use:
+
+```groovy
+stage('Trigger Downstream') {
+    steps {
+        script {
+            if (params.RUN_DOWNSTREAM == 'YES') {
+                passUserToDownstream("Common-Framework/downstream-job-testing")
+            } else {
+                echo "Skipping downstream job..."
+            }
+        }
+    }
+}
+```
+
+---
+
+# ⭐ RESULT
+
+User chooses "YES" → downstream job triggered with user info
+User chooses "NO" → nothing happens
+
+✔ Very clean
+✔ Easy for teams
+✔ No sandbox issues
+
+---
+
+# ✅ OPTION 2 — BOOLEAN PARAMETER (COMMON)
+
+```groovy
+parameters {
+    booleanParam(name: 'TRIGGER_DOWNSTREAM', defaultValue: false, description: 'Trigger downstream job?')
+}
+```
+
+Then:
+
+```groovy
+if (params.TRIGGER_DOWNSTREAM) {
+    passUserToDownstream("Common-Framework/downstream-job-testing")
+}
+```
+
+---
+
+# ✅ OPTION 3 — TRIGGER DOWNSTREAM ONLY ON SUCCESS
+
+```groovy
+post {
+    success {
+        script {
+            passUserToDownstream("Common-Framework/downstream-job-testing")
+        }
+    }
+}
+```
+
+---
+
+# ✅ OPTION 4 — TRIGGER DOWNSTREAM FROM A SPECIFIC STAGE
+
+```groovy
+stage('Deploy') {
+    steps {
+        script {
+            passUserToDownstream("Common-Framework/downstream-job-testing")
+        }
+    }
+}
+```
+
+---
+
+# 🎯 BUT **YOU CANNOT** PUT THIS ANYWHERE ELSE:
+
+### ❌ Not in downstream job
+
+### ❌ Not in shared library except upstream
+
+### ❌ Not in `sendTeamsNotification`
+
+### ❌ Not in `getBuildTriggeredUserDetails`
+
+### ❌ Not in environment block
+
+Because only the **upstream job** knows:
+
+* The real user who triggered the pipeline
+* The user email
+* The Jenkins UserIdCause
+
+Downstream jobs never know the real user unless you pass it manually.
+
+---
+
+# 🟦 SUMMARY OF WHAT TO DO
+
+### ✔ Create choice (or boolean) parameter in upstream job
+
+### ✔ In upstream pipeline, call:
+
+```groovy
+passUserToDownstream("Common-Framework/downstream-job-testing")
+```
+
+inside an appropriate place:
+
+* final stage
+* post-success
+* manual choice
+* only on failure
+* etc.
+
+### ✔ Downstream automatically receives the user info
+
+### ✔ Your existing `sendTeamsNotification` automatically works
+
+### ✔ No complex changes
+
+### ✔ No admin approvals needed
+
+---
+
+# 🌟 If you want, I can generate:
+
+* Full upstream Jenkinsfile
+* Full downstream Jenkinsfile
+* Full shared library folder structure
+
+Just tell me **"give me full pipeline examples"**.
+=================================
+
+  Here is the **exact place** where you must call:
+
+```
+passUserToDownstream("Common-Framework/downstream-job-testing")
+```
+
+This must be done **ONLY in the upstream job**, **right before you trigger the downstream job**.
+Not in downstream.
+Not in shared library.
+Not in sendTeamsNotification.
+
+Only **in the Jenkinsfile (or pipeline)** of the *upstream* job.
+
+---
+
+# ✅ **WHERE TO PUT IT — SIMPLE RULE**
+
+### ✔ Put it **inside the last stage of your upstream job**
+
+### ✔ Right where you normally trigger the downstream job
+
+### ✔ Inside a `script { }` block
+
+---
+
+# 🔵 **EXAMPLE — Upstream Jenkinsfile (Correct Location)**
+
+```groovy
+pipeline {
+    agent any
+
+    stages {
+
+        stage('Build') {
+            steps {
+                echo "Upstream build running..."
+            }
+        }
+
+        stage('Test') {
+            steps {
+                echo "Running tests..."
+            }
+        }
+
+        // 👉 PUT IT HERE — BEFORE triggering downstream
+        stage('Trigger Downstream Job') {
+            steps {
+                script {
+
+                    // THIS TRIGGERS DOWNSTREAM SAFELY
+                    passUserToDownstream("Common-Framework/downstream-job-testing")
+
+                }
+            }
+        }
+    }
+}
+```
+
+---
+
+# 🔥 **IF YOU ARE USING A SHARED LIBRARY METHOD TO TRIGGER JOBS**
+
+Wherever you currently have:
+
+```groovy
+build job: "Common-Framework/downstream-job-testing"
+```
+
+Replace it with:
+
+```groovy
+passUserToDownstream("Common-Framework/downstream-job-testing")
+```
+
+Example:
+
+```groovy
+def call() {
+
+    // your other logic…
+
+    // OLD:
+    // build job: 'Common-Framework/downstream-job-testing'
+
+    // NEW:
+    passUserToDownstream("Common-Framework/downstream-job-testing")
+}
+```
+
+---
+
+# ❌ **Where you should NOT put it**
+
+Do NOT put this in:
+
+* ❌ downstream job
+* ❌ sendTeamsNotification
+* ❌ getBuildTriggeredUserDetails
+* ❌ environment block
+* ❌ before pipeline block
+* ❌ after downstream job
+
+It MUST run **on the upstream job**, **right before triggering the downstream job**.
+
+---
+
+# 🟢 **VALIDATION**
+
+After adding this, run upstream and you will see logs like:
+
+```
+passUserToDownstream: Passing user Nitish Kumar
+Triggering downstream job: Common-Framework/downstream-job-testing
+```
+
+And downstream will have:
+
+```
+UPSTREAM_USER = Nitish Kumar
+UPSTREAM_EMAIL = nitish.kumar@example.com
+```
+
+And your sendTeamsNotification will send correct user.
+
+---
+
+# 🎯 Want me to check your upstream Jenkinsfile and show exact line numbers?
+
+Just paste your upstream pipeline here.
