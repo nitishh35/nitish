@@ -76,18 +76,17 @@ def createEmailJson(def addressList) {
 
      sendteamsnotification for common framework
 
-
-
 def call() {
 
     try {
+        // Build status & failed stage
         def buildStatus = currentBuild.result ?: "SUCCESS"
         def stageName   = env.failedStage ?: "NA"
 
-        // Triggering user info
+        // User who triggered the build
         def userInfo  = getBuildTriggeredUserDetails()
-        def userEmail = userInfo.userEmail
-        def userName  = userInfo.userName
+        def userEmail = userInfo?.userEmail ?: "NA"
+        def userName  = userInfo?.userName ?: "UNKNOWN"
 
         // Skip service accounts
         if (userName?.startsWith("SVC-")) {
@@ -95,7 +94,7 @@ def call() {
             return
         }
 
-        // Build notification payload
+        // Build payload
         def data = [
             pipelineURL     : env.BUILD_URL,
             triggerdBy      : userName,
@@ -104,10 +103,10 @@ def call() {
             stage           : (buildStatus == "FAILURE" ? stageName : "NA")
         ]
 
-        // Convert Map → JSON
+        // Convert Map → JSON (Pipeline built-in)
         def jsonPayload = writeJSON returnText: true, json: data
 
-        // Find webhook URL based on job folder
+        // Detect folder & get webhook
         def channelUrl = getProductWorkflowChannelUrl()
 
         if (!channelUrl) {
@@ -115,7 +114,7 @@ def call() {
             return
         }
 
-        // Send teams notification
+        // Send notification
         notifyTeam(jsonPayload, channelUrl)
 
     } catch (Exception e) {
@@ -124,13 +123,13 @@ def call() {
 }
 
 /////////////////////////////////////////////////////////////////////
-// RESOLVE WEBHOOK BASED ON JOB PATH (API-Products & Common-Framework)
+// RESOLVE WEBHOOK BASED ON JOB LOCATION
 /////////////////////////////////////////////////////////////////////
 
 def getProductWorkflowChannelUrl() {
 
-    def content = libraryResource('pipeline-global-config/workflow-urls.properties')
-    def props   = readProperties text: content
+    def content  = libraryResource('pipeline-global-config/workflow-urls.properties')
+    def props    = readProperties text: content
     def buildUrl = env.BUILD_URL ?: ""
 
     println "INFO: Resolving webhook for Build URL:"
@@ -138,38 +137,48 @@ def getProductWorkflowChannelUrl() {
 
     String productKey = null
 
-    // CASE 1 → API-Products jobs
-    def apiMatcher = buildUrl =~ /\/job\/API-Products\/job\/([^\/]+)\//
-    if (apiMatcher.find()) {
-        productKey = apiMatcher.group(1)
+    //-------------------------------------------------------------------
+    // Case 1 → API-Products/<ProductFolder>/...
+    //-------------------------------------------------------------------
+    def apiMatch = buildUrl =~ /\/job\/API-Products\/job\/([^\/]+)\//
+    if (apiMatch.find()) {
+        productKey = apiMatch.group(1)
         println "INFO: API-Products detected → ${productKey}"
     }
 
-    // CASE 2 → Common-Framework (subfolder)
+    //-------------------------------------------------------------------
+    // Case 2a → Common-Framework subfolder job
+    //-------------------------------------------------------------------
     if (!productKey) {
-        def cfMatcherSub = buildUrl =~ /\/job\/Common-Framework\/job\/([^\/]+)\/job\//
-        if (cfMatcherSub.find()) {
+        def cfSubMatch = buildUrl =~ /\/job\/Common-Framework\/job\/([^\/]+)\/job\//
+        if (cfSubMatch.find()) {
             productKey = "Common-Framework"
             println "INFO: Common-Framework detected (subfolder)"
         }
     }
 
-    // CASE 3 → Common-Framework (direct job)
+    //-------------------------------------------------------------------
+    // Case 2b → Common-Framework direct job
+    //-------------------------------------------------------------------
     if (!productKey) {
-        def cfMatcherDirect = buildUrl =~ /\/job\/Common-Framework\/job\/([^\/]+)\//
-        if (cfMatcherDirect.find()) {
+        def cfDirectMatch = buildUrl =~ /\/job\/Common-Framework\/job\/([^\/]+)\//
+        if (cfDirectMatch.find()) {
             productKey = "Common-Framework"
-            println "INFO: Common-Framework detected (direct job)"
+            println "INFO: Common-Framework detected (direct)"
         }
     }
 
-    // No folder matched
+    //-------------------------------------------------------------------
+    // No folder match
+    //-------------------------------------------------------------------
     if (!productKey) {
         println "WARN: No capability folder detected. Notification skipped."
         return null
     }
 
-    // Lookup webhook URL in workflow-urls.properties
+    //-------------------------------------------------------------------
+    // Look up webhook in properties file
+    //-------------------------------------------------------------------
     def webhookUrl = props[productKey]
 
     if (!webhookUrl) {
@@ -182,7 +191,7 @@ def getProductWorkflowChannelUrl() {
 }
 
 /////////////////////////////////////////////////////////////////////
-// CURL NOTIFIER (Teams / Power Automate)
+// CURL NOTIFIER
 /////////////////////////////////////////////////////////////////////
 
 def notifyTeam(String jsonPayload, String webhookUrl) {
@@ -191,9 +200,9 @@ def notifyTeam(String jsonPayload, String webhookUrl) {
 
     def httpResponse = sh(
         script: """
-            curl -s -k -w "%{http_code}" \
-                -H 'Content-Type: application/json' \
-                -X POST '${webhookUrl}' \
+            curl -s -k -w "%{http_code}" \\
+                -H 'Content-Type: application/json' \\
+                -X POST '${webhookUrl}' \\
                 -d '${safePayload}'
         """,
         returnStdout: true
@@ -201,3 +210,5 @@ def notifyTeam(String jsonPayload, String webhookUrl) {
 
     println "INFO: Teams webhook response code: ${httpResponse}"
 }
+
+
