@@ -214,35 +214,84 @@ def notifyTeam(String jsonPayload, String webhookUrl) {
 
     update code as per syf code for sendteamsnotification
 
+
+    def call() {
+
+    try {
+
+        def buildStatus = currentBuild.result
+        def stageName = "NA"
+
+        if (currentBuild.result.equalsIgnoreCase("FAILURE")) {
+            stageName = env.failedStage
+        }
+
+        def userInfo = getBuildTriggeredUserDetails()
+        def buildTriggeredUserEmailId = userInfo.userEmail
+        def buildTriggeredUserName = userInfo.userName
+
+        if (buildTriggeredUserName == 'SVC-APP-RLCT') {
+            println "INFO: Notification suppressed for service account user: ${buildTriggeredUserName}"
+            return
+        }
+
+        def buildData = [:]
+        buildData["pipelineURL"] = env.BUILD_URL
+        buildData["triggerdBy"] = buildTriggeredUserName
+        buildData["triggerdByEmail"] = buildTriggeredUserEmailId
+        buildData["status"] = buildStatus
+
+        if (buildStatus == "FAILURE") {
+            buildData["stage"] = stageName
+        } else if (buildStatus == "SUCCESS" || buildStatus == "ABORTED" || buildStatus == "UNSTABLE") {
+            buildData["stage"] = "NA"
+        }
+
+        def buildDataJson = groovy.json.JsonOutput.toJson(buildData)
+
+        def channelUrl = getProductWorkflowChannelUrl()
+
+        if (channelUrl) {
+            notifyTeam(buildDataJson, channelUrl)
+        }
+
+    } catch (Exception e) {
+        println "ERROR: Failed to send Teams notification: ${e.message}"
+    }
+}
+
+///////////////////////////////////////////////////////
+// RESOLVE WEBHOOK URL
+///////////////////////////////////////////////////////
+
 def getProductWorkflowChannelUrl() {
 
     def content = libraryResource('pipeline-global-config/workflow-urls.properties')
     def props = readProperties text: content
-
     def buildUrl = env.BUILD_URL ?: ""
 
-    // MATCH API-PRODUCTS
+    // -------------------------
+    // API-PRODUCTS MATCH
+    // -------------------------
     def matcher = buildUrl =~ /\/job\/API-Products\/job\/([^\/]+)/
-
     def productName = ""
 
     if (matcher.find()) {
         productName = matcher.group(1)
         println "INFO: API-Products detected → ${productName}"
-    } 
-    else {
+    } else {
 
         // -------------------------------------------
-        // ADDING COMMON-FRAMEWORK (SUBFOLDER) SUPPORT
+        // COMMON-FRAMEWORK (SUBFOLDER MATCH ADDED)
         // -------------------------------------------
-        def cfSubFolder = buildUrl =~ /\/job\/Common-Framework\/job\/([^\/]+)\/job\//
-        if (cfSubFolder.find()) {
+        def cfSub = buildUrl =~ /\/job\/Common-Framework\/job\/([^\/]+)\/job\//
+        if (cfSub.find()) {
             productName = "Common-Framework"
             println "INFO: Common-Framework detected (subfolder)"
         }
 
         // -------------------------------------------
-        // ADDING COMMON-FRAMEWORK (DIRECT JOB) SUPPORT
+        // COMMON-FRAMEWORK (DIRECT MATCH ADDED)
         // -------------------------------------------
         if (!productName) {
             def cfDirect = buildUrl =~ /\/job\/Common-Framework\/job\/([^\/]+)\//
@@ -253,7 +302,7 @@ def getProductWorkflowChannelUrl() {
         }
 
         // -------------------------------------------
-        // NOTHING MATCHED
+        // NO MATCH
         // -------------------------------------------
         if (!productName) {
             println "WARN: Skipping team notification for this build, unable to extract the capability folder name from the URL: ${buildUrl}"
@@ -269,6 +318,26 @@ def getProductWorkflowChannelUrl() {
     }
 
     return channelUrl
+}
+
+///////////////////////////////////////////////////////
+// CURL NOTIFICATION
+///////////////////////////////////////////////////////
+
+def notifyTeam(def buildDataJson, def channelUrl) {
+
+    def responseCode = sh(
+        script: """
+            curl -k -w '%{http_code}' \
+            -H 'Content-Type: application/json' \
+            -H 'Accept: application/json' \
+            -X POST '${channelUrl}' \
+            -d '${buildDataJson.replace("'", "'\\''")}'
+        """,
+        returnStdout: true
+    ).trim()
+
+    println "INFO: The received HTTP response code from DevOps teams channel curl request: ${responseCode}"
 }
 
 
