@@ -1,5 +1,3 @@
-workinhg code for the devops chnanel and fortify chnnael
-
 def call() {
     def envProperty = loadEnvironmentProperties()
 
@@ -11,7 +9,7 @@ def call() {
     def pipelineUrl = env.BUILD_URL ?: ""
 
     // ---------------------------
-    // Build DevOps JSON
+    // DevOps JSON
     // ---------------------------
     def devOpsJson = createEmailJson(emailAddressList)
     devOpsJson.put("pipelineUrl", pipelineUrl)
@@ -19,13 +17,12 @@ def call() {
     def devOpsBody = groovy.json.JsonOutput.toJson(devOpsJson)
     println "INFO: DevOps JSON to send: ${devOpsBody}"
 
-    // Call DevOps Teams
     def devOpsResponse = sh(
         script: """
-            curl -s -o /dev/null -w "%{http_code}" \\
-                 -H "Content-Type: application/json" \\
-                 -H "Accept: application/json" \\
-                 -X POST "${devopsWorkFlowUrl}" \\
+            curl -s -o /dev/null -w "%{http_code}" \
+                 -H "Content-Type: application/json" \
+                 -H "Accept: application/json" \
+                 -X POST "${devopsWorkFlowUrl}" \
                  -d '${devOpsBody.replace("'", "'\\\\''")}'
         """,
         returnStdout: true
@@ -34,21 +31,28 @@ def call() {
     println "INFO: DevOps Teams channel response code: ${devOpsResponse}"
 
     // ---------------------------
-    // Build Fortify JSON
+    // Fortify JSON (JsonSlurper SAFE)
     // ---------------------------
-    def fortifyJson = new groovy.json.JsonSlurper().parseText(fortifyChannelEmails)
+    def fortifyString = fortifyChannelEmails?.trim() ?: ""
+
+    // If Jenkins loads the value as '{"email1"..."}'
+    if (fortifyString.startsWith("'") && fortifyString.endsWith("'")) {
+        fortifyString = fortifyString.substring(1, fortifyString.length() - 1)
+    }
+
+    // Parse JSON safely
+    def fortifyJson = new groovy.json.JsonSlurper().parseText(fortifyString)
     fortifyJson.put("pipelineUrl", pipelineUrl)
 
     def fortifyBody = groovy.json.JsonOutput.toJson(fortifyJson)
     println "INFO: Fortify JSON to send: ${fortifyBody}"
 
-    // Call Fortify Teams
     def fortifyResponse = sh(
         script: """
-            curl -s -o /dev/null -w "%{http_code}" \\
-                 -H "Content-Type: application/json" \\
-                 -H "Accept: application/json" \\
-                 -X POST "${fortifyWorkFlowUrl}" \\
+            curl -s -o /dev/null -w "%{http_code}" \
+                 -H "Content-Type: application/json" \
+                 -H "Accept: application/json" \
+                 -X POST "${fortifyWorkFlowUrl}" \
                  -d '${fortifyBody.replace("'", "'\\\\''")}'
         """,
         returnStdout: true
@@ -59,6 +63,9 @@ def call() {
 
 
 
+// ---------------------------------------------
+// EMAIL JSON BUILDER (for DevOps only)
+// ---------------------------------------------
 def createEmailJson(def addressList) {
     def emails = addressList.split(",").collect { it.trim() }
     def map = [:]
@@ -66,143 +73,6 @@ def createEmailJson(def addressList) {
     emails.eachWithIndex { email, index ->
         map["email${index + 1}"] = email
     }
-
-    return map
-}
-======================================
-
-    only to devops team
---------------------------------------
-   import groovy.json.JsonOutput
-import groovy.json.JsonSlurper
-
-def call() {
-
-    def envProperty = loadEnvironmentProperties()
-
-    def devopsWorkFlowUrl     = envProperty.devops_workflow_url
-    def devopsChannelMessage  = envProperty.devops_channel_message
-    def emailAddressList      = envProperty.to_email_address_list
-
-    def buildUrl = env.BUILD_URL ?: ""
-
-    // Build the JSON for email list
-    def emailJson = createEmailJson(emailAddressList)
-
-    def jsonMap = new JsonSlurper().parseText(emailJson)
-    jsonMap.buildUrl = buildUrl
-    jsonMap.message  = devopsChannelMessage
-
-    def finalJson = JsonOutput.toJson(jsonMap)
-
-    println "INFO: Final JSON to send → ${finalJson}"
-
-    // Escape single quotes for safe curl usage
-    def escapedBody = finalJson.replace("'", "'\"'\"'")
-
-    def response = sh(
-        script: """
-            curl -s -o /dev/null -w "%{http_code}" \\
-                -H "Content-Type: application/json" \\
-                -X POST '${devopsWorkFlowUrl}' \\
-                -d '${escapedBody}'
-        """,
-        returnStdout: true
-    ).trim()
-
-    println "INFO: DevOps Teams Response Code: ${response}"
-}
-
-
-// ---------------------------
-// Helper Method
-// ---------------------------
-def createEmailJson(String emailAddressList) {
-
-    def emailList = emailAddressList.split(',').collect { it.trim() }
-
-    def emailMap = [:]
-    emailList.eachWithIndex { email, index ->
-        emailMap["email${index + 1}"] = email
-    }
-
-    def jsonStr = JsonOutput.toJson(emailMap)
-
-    println "INFO: Email JSON created → ${jsonStr}"
-
-    return jsonStr
-}
-
--==================================
-
-    second update code
-def call() {
-    def envProperty = loadEnvironmentProperties()
-
-    def devopsWorkFlowUrl      = envProperty.devops_workflow_url
-    def fortifyWorkFlowUrl     = envProperty.fortify_workflow_url
-    def fortifyChannelEmails   = envProperty.fortify_channel_emails_json
-    def emailAddressList       = envProperty.to_email_address_list
-
-    def pipelineUrl = env.BUILD_URL ?: ""
-
-    // ---------------------------
-    // Build DevOps JSON
-    // ---------------------------
-    def devOpsJson = createEmailJson(emailAddressList)
-    devOpsJson.put("pipelineUrl", pipelineUrl)
-
-    def devOpsBody = groovy.json.JsonOutput.toJson(devOpsJson)
-    println "INFO: DevOps JSON to send: ${devOpsBody}"
-
-    // Call DevOps Teams
-    def devOpsResponse = sh(
-        script: """
-            curl -s -o /dev/null -w "%{http_code}" \\
-                 -H "Content-Type: application/json" \\
-                 -H "Accept: application/json" \\
-                 -X POST "${devopsWorkFlowUrl}" \\
-                 -d '${devOpsBody.replace("'", "'\\\\''")}'
-        """,
-        returnStdout: true
-    ).trim()
-
-    println "INFO: DevOps Teams channel response code: ${devOpsResponse}"
-
-    // ---------------------------
-    // Build Fortify JSON
-    // ---------------------------
-    def fortifyJson = new groovy.json.JsonSlurper().parseText(fortifyChannelEmails)
-    fortifyJson.put("pipelineUrl", pipelineUrl)
-
-    def fortifyBody = groovy.json.JsonOutput.toJson(fortifyJson)
-    println "INFO: Fortify JSON to send: ${fortifyBody}"
-
-    // Call Fortify Teams
-    def fortifyResponse = sh(
-        script: """
-            curl -s -o /dev/null -w "%{http_code}" \\
-                 -H "Content-Type: application/json" \\
-                 -H "Accept: application/json" \\
-                 -X POST "${fortifyWorkFlowUrl}" \\
-                 -d '${fortifyBody.replace("'", "'\\\\''")}'
-        """,
-        returnStdout: true
-    ).trim()
-
-    println "INFO: Fortify Teams channel response code: ${fortifyResponse}"
-}
-
-
-
-def createEmailJson(def addressList) {
-    def emails = addressList.split(",").collect { it.trim() }
-    def map = [:]
-
-    emails.eachWithIndex { email, index ->
-        map["email${index + 1}"] = email
-    }
-
     return map
 }
 
