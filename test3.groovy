@@ -133,6 +133,80 @@ def createEmailJson(String emailAddressList) {
     return jsonStr
 }
 
+-==================================
+
+    second update code
+def call() {
+    def envProperty = loadEnvironmentProperties()
+
+    def devopsWorkFlowUrl      = envProperty.devops_workflow_url
+    def fortifyWorkFlowUrl     = envProperty.fortify_workflow_url
+    def fortifyChannelEmails   = envProperty.fortify_channel_emails_json
+    def emailAddressList       = envProperty.to_email_address_list
+
+    def pipelineUrl = env.BUILD_URL ?: ""
+
+    // ---------------------------
+    // Build DevOps JSON
+    // ---------------------------
+    def devOpsJson = createEmailJson(emailAddressList)
+    devOpsJson.put("pipelineUrl", pipelineUrl)
+
+    def devOpsBody = groovy.json.JsonOutput.toJson(devOpsJson)
+    println "INFO: DevOps JSON to send: ${devOpsBody}"
+
+    // Call DevOps Teams
+    def devOpsResponse = sh(
+        script: """
+            curl -s -o /dev/null -w "%{http_code}" \\
+                 -H "Content-Type: application/json" \\
+                 -H "Accept: application/json" \\
+                 -X POST "${devopsWorkFlowUrl}" \\
+                 -d '${devOpsBody.replace("'", "'\\\\''")}'
+        """,
+        returnStdout: true
+    ).trim()
+
+    println "INFO: DevOps Teams channel response code: ${devOpsResponse}"
+
+    // ---------------------------
+    // Build Fortify JSON
+    // ---------------------------
+    def fortifyJson = new groovy.json.JsonSlurper().parseText(fortifyChannelEmails)
+    fortifyJson.put("pipelineUrl", pipelineUrl)
+
+    def fortifyBody = groovy.json.JsonOutput.toJson(fortifyJson)
+    println "INFO: Fortify JSON to send: ${fortifyBody}"
+
+    // Call Fortify Teams
+    def fortifyResponse = sh(
+        script: """
+            curl -s -o /dev/null -w "%{http_code}" \\
+                 -H "Content-Type: application/json" \\
+                 -H "Accept: application/json" \\
+                 -X POST "${fortifyWorkFlowUrl}" \\
+                 -d '${fortifyBody.replace("'", "'\\\\''")}'
+        """,
+        returnStdout: true
+    ).trim()
+
+    println "INFO: Fortify Teams channel response code: ${fortifyResponse}"
+}
+
+
+
+def createEmailJson(def addressList) {
+    def emails = addressList.split(",").collect { it.trim() }
+    def map = [:]
+
+    emails.eachWithIndex { email, index ->
+        map["email${index + 1}"] = email
+    }
+
+    return map
+}
+
+
 ---------------
 ------------------------------------------
 
