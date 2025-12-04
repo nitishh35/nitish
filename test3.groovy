@@ -65,23 +65,24 @@ def call() {
     avoaid lazymap error
 
 def call() {
-    // Do NOT modify this — you requested to keep it as is
     def envProperty = loadEnvironmentProperties()
 
-    def devopsWorkFlowUrl      = envProperty.devops_workflow_url
-    def fortifyWorkFlowUrl     = envProperty.fortify_workflow_url
-    def fortifyChannelEmails   = envProperty.fortify_channel_emails_json
-    def emailAddressList       = envProperty.to_email_address_list
+    // Convert LazyMap values → String (fixes LazyMap issue)
+    def devopsWorkFlowUrl    = envProperty.devops_workflow_url?.toString()
+    def fortifyWorkFlowUrl   = envProperty.fortify_workflow_url?.toString()
+    def fortifyChannelEmails = envProperty.fortify_channel_emails_json?.toString()
+    def emailAddressList     = envProperty.to_email_address_list?.toString()
 
     def pipelineUrl = env.BUILD_URL ?: ""
 
-
-    // ------------------------------------------------------------------
-    // DEVOPS NOTIFICATION DISABLED — COMMENTED AS YOU REQUESTED
-    // ------------------------------------------------------------------
-    /*
+    // ---------------------------
+    // DevOps JSON
+    // ---------------------------
     def devOpsJson = createEmailJson(emailAddressList)
     devOpsJson.put("pipelineUrl", pipelineUrl)
+
+    // Remove nulls to prevent LazyMap error
+    devOpsJson = devOpsJson.findAll { k, v -> v != null }
 
     def devOpsBody = groovy.json.JsonOutput.toJson(devOpsJson)
     println "INFO: DevOps JSON to send: ${devOpsBody}"
@@ -98,26 +99,18 @@ def call() {
     ).trim()
 
     println "INFO: DevOps Teams channel response code: ${devOpsResponse}"
-    */
 
+    // ---------------------------
+    // Fortify JSON (SAFE)
+    // ---------------------------
 
-    // ------------------------------------------------------------------
-    // FORTIFY NOTIFICATION — SAFE FROM LazyMap ERRORS
-    // ------------------------------------------------------------------
+    // fortifyChannelEmails is now DEFINITELY a String
+    def fortifyJson = new groovy.json.JsonSlurper().parseText(fortifyChannelEmails)
 
-    // Convert LazyMap value → pure String (critical fix)
-    def fortifyString = "${fortifyChannelEmails}".trim()
-
-    // If Jenkins adds wrapping single quotes, remove them
-    if (fortifyString.startsWith("'") && fortifyString.endsWith("'")) {
-        fortifyString = fortifyString.substring(1, fortifyString.length() - 1)
-    }
-
-    // Safe JSON parsing (no LazyMap interaction)
-    def fortifyJson = new groovy.json.JsonSlurper().parseText(fortifyString)
-
-    // Add pipeline URL
     fortifyJson.put("pipelineUrl", pipelineUrl)
+
+    // Remove nulls to avoid LazyMap
+    fortifyJson = fortifyJson.findAll { k, v -> v != null }
 
     def fortifyBody = groovy.json.JsonOutput.toJson(fortifyJson)
     println "INFO: Fortify JSON to send: ${fortifyBody}"
@@ -135,6 +128,21 @@ def call() {
 
     println "INFO: Fortify Teams channel response code: ${fortifyResponse}"
 }
+
+
+
+
+def createEmailJson(def addressList) {
+    def emails = addressList.split(",").collect { it.trim() }
+    def map = [:]
+
+    emails.eachWithIndex { email, index ->
+        map["email${index + 1}"] = email
+    }
+
+    return map
+}
+
 
 
 
