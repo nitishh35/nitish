@@ -73,48 +73,54 @@ def createEmailJson(def addressList) {
 
     only to devops team
 --------------------------------------
-    dimport groovy.json.JsonOutput
+    import groovy.json.JsonOutput
+import groovy.json.JsonSlurper
 
 def call() {
 
+    // Load environment properties
     def envProperty = loadEnvironmentProperties()
 
     def devopsWorkFlowUrl     = envProperty.devops_workflow_url
     def devopsChannelMessage  = envProperty.devops_channel_message
-    def emailAdressList       = envProperty.to_email_address_list
+    def emailAddressList      = envProperty.to_email_address_list
 
     // Capture Jenkins build URL
     def buildUrl = env.BUILD_URL ?: ""
 
-    // Create original JSON
-    def dataString = createEmailJson(emailAdressList)
+    // Build original email JSON
+    def originalJson = createEmailJson(emailAddressList)
 
-    // Append buildUrl to JSON safely
-    def jsonMap = new groovy.json.JsonSlurper().parseText(dataString)
+    // Convert JSON string → Map
+    def jsonMap = new JsonSlurper().parseText(originalJson)
+
+    // Add build URL to JSON
     jsonMap.buildUrl = buildUrl
+    jsonMap.message  = devopsChannelMessage
 
+    // Convert updated JSON back to string
     def finalJson = JsonOutput.toJson(jsonMap)
 
     println "INFO: DevOps JSON to send: ${finalJson}"
 
-    // Prepare body safely for curl
+    // Escape single quotes for safe curl usage
     def escapedBody = finalJson.replace("'", "'\"'\"'")
 
-    // Curl call
-    def devopsChannelResponseCode = sh(
+    // Execute curl POST to DevOps Teams channel
+    def responseCode = sh(
         script: """
-            curl -s -o /dev/null -w "%{http_code}" \
-                 -H "Content-Type: application/json" \
-                 -H "Accept: application/json" \
-                 -X POST '${devopsWorkFlowUrl}' \
+            curl -s -o /dev/null -w "%{http_code}" \\
+                 -H "Content-Type: application/json" \\
+                 -H "Accept: application/json" \\
+                 -X POST '${devopsWorkFlowUrl}' \\
                  -d '${escapedBody}'
         """,
         returnStdout: true
     ).trim()
 
-    println "INFO: DevOps Teams channel response code: ${devopsChannelResponseCode}"
+    println "INFO: DevOps Teams channel response code: ${responseCode}"
 }
-
+---------------
 ------------------------------------------
 
     ---------------------------------------------
