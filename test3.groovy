@@ -69,6 +69,39 @@ def createEmailJson(def addressList) {
 
     return map
 }
+======================================
+
+    only to devops team
+--------------------------------------
+    def call() {
+
+    def envProperty loadEnvironment Properties()
+
+    def devopsWorkFlowUrl envProperty.devops_workflow_url
+    def devopsChannelMessage envProperty.devops_channel_message
+    def emailAdressList envProperty.to_email_address_list
+
+    // ******** ADDED LINE: capture Jenkins build URL ********
+    def buildUrl = env.BUILD_URL ?: ""
+
+    // ******** ORIGINAL JSON CREATION ********
+    def dataString = createEmailJson(emailAdressList)
+
+    // ******** ADDED LINE: append buildUrl into JSON ********
+    dataString = dataString.replace("}", ", \"buildUrl\": \"${buildUrl}\" }")
+
+    println "INFO: DevOps JSON to send: ${dataString}"
+
+    // ******** ORIGINAL CURL CALL ********
+    def devopsChannelResponseCode = sh(
+        script: "curl -w '%{http_code}' -H 'Content-Type: application/json' -H 'Accept: application/json' " +
+                "-X POST '${devopsWorkFlowUrl}' -d '${dataString.replace(\"'\", \"'\\\\''\")}'",
+        returnStdout: true
+    ).trim()
+
+    println "INFO: DevOps Teams channel response code: ${devopsChannelResponseCode}"
+}
+------------------------------------------
 
     ---------------------------------------------
         ==============================================
