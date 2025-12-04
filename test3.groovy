@@ -73,53 +73,66 @@ def createEmailJson(def addressList) {
 
     only to devops team
 --------------------------------------
-    import groovy.json.JsonOutput
+   import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 
 def call() {
 
-    // Load environment properties
     def envProperty = loadEnvironmentProperties()
 
     def devopsWorkFlowUrl     = envProperty.devops_workflow_url
     def devopsChannelMessage  = envProperty.devops_channel_message
     def emailAddressList      = envProperty.to_email_address_list
 
-    // Capture Jenkins build URL
     def buildUrl = env.BUILD_URL ?: ""
 
-    // Build original email JSON
-    def originalJson = createEmailJson(emailAddressList)
+    // Build the JSON for email list
+    def emailJson = createEmailJson(emailAddressList)
 
-    // Convert JSON string → Map
-    def jsonMap = new JsonSlurper().parseText(originalJson)
-
-    // Add build URL to JSON
+    def jsonMap = new JsonSlurper().parseText(emailJson)
     jsonMap.buildUrl = buildUrl
     jsonMap.message  = devopsChannelMessage
 
-    // Convert updated JSON back to string
     def finalJson = JsonOutput.toJson(jsonMap)
 
-    println "INFO: DevOps JSON to send: ${finalJson}"
+    println "INFO: Final JSON to send → ${finalJson}"
 
     // Escape single quotes for safe curl usage
     def escapedBody = finalJson.replace("'", "'\"'\"'")
 
-    // Execute curl POST to DevOps Teams channel
-    def responseCode = sh(
+    def response = sh(
         script: """
             curl -s -o /dev/null -w "%{http_code}" \\
-                 -H "Content-Type: application/json" \\
-                 -H "Accept: application/json" \\
-                 -X POST '${devopsWorkFlowUrl}' \\
-                 -d '${escapedBody}'
+                -H "Content-Type: application/json" \\
+                -X POST '${devopsWorkFlowUrl}' \\
+                -d '${escapedBody}'
         """,
         returnStdout: true
     ).trim()
 
-    println "INFO: DevOps Teams channel response code: ${responseCode}"
+    println "INFO: DevOps Teams Response Code: ${response}"
 }
+
+
+// ---------------------------
+// Helper Method
+// ---------------------------
+def createEmailJson(String emailAddressList) {
+
+    def emailList = emailAddressList.split(',').collect { it.trim() }
+
+    def emailMap = [:]
+    emailList.eachWithIndex { email, index ->
+        emailMap["email${index + 1}"] = email
+    }
+
+    def jsonStr = JsonOutput.toJson(emailMap)
+
+    println "INFO: Email JSON created → ${jsonStr}"
+
+    return jsonStr
+}
+
 ---------------
 ------------------------------------------
 
