@@ -61,11 +61,87 @@ def call() {
     println "INFO: Fortify Teams channel response code: ${fortifyResponse}"
 }
 
+===============================
+    avoaid lazymap error
+
+def call() {
+    // Do NOT modify this — you requested to keep it as is
+    def envProperty = loadEnvironmentProperties()
+
+    def devopsWorkFlowUrl      = envProperty.devops_workflow_url
+    def fortifyWorkFlowUrl     = envProperty.fortify_workflow_url
+    def fortifyChannelEmails   = envProperty.fortify_channel_emails_json
+    def emailAddressList       = envProperty.to_email_address_list
+
+    def pipelineUrl = env.BUILD_URL ?: ""
 
 
-// ---------------------------------------------
-// EMAIL JSON BUILDER (for DevOps only)
-// ---------------------------------------------
+    // ------------------------------------------------------------------
+    // DEVOPS NOTIFICATION DISABLED — COMMENTED AS YOU REQUESTED
+    // ------------------------------------------------------------------
+    /*
+    def devOpsJson = createEmailJson(emailAddressList)
+    devOpsJson.put("pipelineUrl", pipelineUrl)
+
+    def devOpsBody = groovy.json.JsonOutput.toJson(devOpsJson)
+    println "INFO: DevOps JSON to send: ${devOpsBody}"
+
+    def devOpsResponse = sh(
+        script: """
+            curl -s -o /dev/null -w "%{http_code}" \
+                 -H "Content-Type: application/json" \
+                 -H "Accept: application/json" \
+                 -X POST "${devopsWorkFlowUrl}" \
+                 -d '${devOpsBody.replace("'", "'\\\\''")}'
+        """,
+        returnStdout: true
+    ).trim()
+
+    println "INFO: DevOps Teams channel response code: ${devOpsResponse}"
+    */
+
+
+    // ------------------------------------------------------------------
+    // FORTIFY NOTIFICATION — SAFE FROM LazyMap ERRORS
+    // ------------------------------------------------------------------
+
+    // Convert LazyMap value → pure String (critical fix)
+    def fortifyString = "${fortifyChannelEmails}".trim()
+
+    // If Jenkins adds wrapping single quotes, remove them
+    if (fortifyString.startsWith("'") && fortifyString.endsWith("'")) {
+        fortifyString = fortifyString.substring(1, fortifyString.length() - 1)
+    }
+
+    // Safe JSON parsing (no LazyMap interaction)
+    def fortifyJson = new groovy.json.JsonSlurper().parseText(fortifyString)
+
+    // Add pipeline URL
+    fortifyJson.put("pipelineUrl", pipelineUrl)
+
+    def fortifyBody = groovy.json.JsonOutput.toJson(fortifyJson)
+    println "INFO: Fortify JSON to send: ${fortifyBody}"
+
+    def fortifyResponse = sh(
+        script: """
+            curl -s -o /dev/null -w "%{http_code}" \
+                 -H "Content-Type: application/json" \
+                 -H "Accept: application/json" \
+                 -X POST "${fortifyWorkFlowUrl}" \
+                 -d '${fortifyBody.replace("'", "'\\\\''")}'
+        """,
+        returnStdout: true
+    ).trim()
+
+    println "INFO: Fortify Teams channel response code: ${fortifyResponse}"
+}
+
+
+
+// ------------------------------------------------------------------
+// FUNCTION: Converts comma-separated emails → JSON map
+// Used only for DevOps (which is now disabled)
+// ------------------------------------------------------------------
 def createEmailJson(def addressList) {
     def emails = addressList.split(",").collect { it.trim() }
     def map = [:]
@@ -76,11 +152,6 @@ def createEmailJson(def addressList) {
     return map
 }
 
-
----------------
-------------------------------------------
-
-    ---------------------------------------------
         ==============================================
 
 
