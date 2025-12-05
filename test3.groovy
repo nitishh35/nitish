@@ -62,103 +62,97 @@ def call() {
 }
 
 ===============================
-    avoaid lazymap error
+    working code for both need to test
+    def call() {
 
-def call() {
-    def envProperty = loadEnvironmentProperties()
-
-    // Convert LazyMap values → String (fixes LazyMap issue)
-    def devopsWorkFlowUrl    = envProperty.devops_workflow_url?.toString()
-    def fortifyWorkFlowUrl   = envProperty.fortify_workflow_url?.toString()
-    def fortifyChannelEmails = envProperty.fortify_channel_emails_json?.toString()
-    def emailAddressList     = envProperty.to_email_address_list?.toString()
+    def envProperty          = loadEnvironmentProperties()
+    def devopsWorkFlowUrl    = envProperty.devops_workflow_url
+    def fortifyWorkFlowUrl   = envProperty.fortify_workflow_url
+    def emailAddressList     = envProperty.to_email_address_list
+    def fortifyChannelEmails = envProperty.fortify_channel_emails_json
 
     def pipelineUrl = env.BUILD_URL ?: ""
 
-    // ---------------------------
-    // DevOps JSON
-    // ---------------------------
-    def devOpsJson = createEmailJson(emailAddressList)
-    devOpsJson.put("pipelineUrl", pipelineUrl)
+    //----------------------------------------------------------------------
+    // 1. CREATE DEVOPS JSON
+    //----------------------------------------------------------------------
+    def baseDevOpsJson = createEmailJson(emailAddressList)
 
-    // Remove nulls to prevent LazyMap error
-    devOpsJson = devOpsJson.findAll { k, v -> v != null }
+    // Append pipelineUrl into JSON
+    def enrichedDevOpsJson = baseDevOpsJson.replace(
+        "}",
+        ",\"pipelineUrl\": \"${pipelineUrl}\"}"
+    )
 
-    def devOpsBody = groovy.json.JsonOutput.toJson(devOpsJson)
-    println "INFO: DevOps JSON to send: ${devOpsBody}"
+    println "INFO: DevOps JSON to send: ${enrichedDevOpsJson}"
 
-    def devOpsResponse = sh(
+    // Escape single quotes for shell
+    def escapedDevOpsJson = enrichedDevOpsJson.replace("'", "'\\\\''")
+
+    //----------------------------------------------------------------------
+    // SEND TO DEVOPS TEAMS CHANNEL
+    //----------------------------------------------------------------------
+    def devOpsResponseCode = sh(
         script: """
             curl -s -o /dev/null -w "%{http_code}" \
-                 -H "Content-Type: application/json" \
-                 -H "Accept: application/json" \
-                 -X POST "${devopsWorkFlowUrl}" \
-                 -d '${devOpsBody.replace("'", "'\\\\''")}'
+            -H "Content-Type: application/json" \
+            -H "Accept: application/json" \
+            -X POST "${devopsWorkFlowUrl}" \
+            -d '${escapedDevOpsJson}'
         """,
         returnStdout: true
     ).trim()
 
-    println "INFO: DevOps Teams channel response code: ${devOpsResponse}"
+    println "INFO: DevOps Teams channel response code: ${devOpsResponseCode}"
 
-    // ---------------------------
-    // Fortify JSON (SAFE)
-    // ---------------------------
 
-    // fortifyChannelEmails is now DEFINITELY a String
-    def fortifyJson = new groovy.json.JsonSlurper().parseText(fortifyChannelEmails)
+    //----------------------------------------------------------------------
+    // 2. CREATE FORTIFY JSON
+    //----------------------------------------------------------------------
+    def enrichedFortifyJson = fortifyChannelEmails.replace(
+        "}",
+        ",\"pipelineUrl\": \"${pipelineUrl}\"}"
+    )
 
-    fortifyJson.put("pipelineUrl", pipelineUrl)
+    println "INFO: Fortify JSON to send: ${enrichedFortifyJson}"
 
-    // Remove nulls to avoid LazyMap
-    fortifyJson = fortifyJson.findAll { k, v -> v != null }
+    def escapedFortifyJson = enrichedFortifyJson.replace("'", "'\\\\''")
 
-    def fortifyBody = groovy.json.JsonOutput.toJson(fortifyJson)
-    println "INFO: Fortify JSON to send: ${fortifyBody}"
-
-    def fortifyResponse = sh(
+    //----------------------------------------------------------------------
+    // SEND TO FORTIFY TEAMS CHANNEL
+    //----------------------------------------------------------------------
+    def fortifyResponseCode = sh(
         script: """
             curl -s -o /dev/null -w "%{http_code}" \
-                 -H "Content-Type: application/json" \
-                 -H "Accept: application/json" \
-                 -X POST "${fortifyWorkFlowUrl}" \
-                 -d '${fortifyBody.replace("'", "'\\\\''")}'
+            -H "Content-Type: application/json" \
+            -H "Accept: application/json" \
+            -X POST "${fortifyWorkFlowUrl}" \
+            -d '${escapedFortifyJson}'
         """,
         returnStdout: true
     ).trim()
 
-    println "INFO: Fortify Teams channel response code: ${fortifyResponse}"
+    println "INFO: Fortify support channel response code: ${fortifyResponseCode}"
 }
 
 
 
+def createEmailJson(def emailAddressList) {
 
-def createEmailJson(def addressList) {
-    def emails = addressList.split(",").collect { it.trim() }
-    def map = [:]
+    def emails = emailAddressList.split(',').collect { it.trim() }
+    def emailMap = [:]
 
     emails.eachWithIndex { email, index ->
-        map["email${index + 1}"] = email
+        emailMap["email${index + 1}"] = email
     }
 
-    return map
+    def jsonString = groovy.json.JsonOutput.toJson(emailMap)
+
+    println "INFO: Email JSON created: ${jsonString}"
+
+    return jsonString
 }
 
-
-
-
-// ------------------------------------------------------------------
-// FUNCTION: Converts comma-separated emails → JSON map
-// Used only for DevOps (which is now disabled)
-// ------------------------------------------------------------------
-def createEmailJson(def addressList) {
-    def emails = addressList.split(",").collect { it.trim() }
-    def map = [:]
-
-    emails.eachWithIndex { email, index ->
-        map["email${index + 1}"] = email
-    }
-    return map
-}
 
         ==============================================
 
