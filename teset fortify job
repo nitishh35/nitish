@@ -313,5 +313,20 @@ INFO: First failure → sending notification
 
 ---
 
-# ⭐ If you want I can update your entire POC Jenkinsfile (clean, fixed, ready to paste).
+# ⭐ If you want I can update your entire POC Jenkinsfile (clean, fixe
+===============================================================
+
+| Test | SCENARIO | Expected Behavior       |
+| ---- | -------- | ----------------------- |
+| 1    | FAILURE  | First notification sent |
+| 2    | FAILURE  | No notification sent    |
+| 3    | SUCCESS  | Reset flag              |
+| 4    | FAILURE  | Notification sent again |
+| 5    | FAILURE  | No notification         |
+| 6    | SUCCESS  | Reset                   |
+| 7    | FAILURE  | Notification sent again |
+| 8    | FAILURE  | No notification         |
+| 9    | SUCCESS  | Reset                   |
+| …    | …        | Repeat forever          |
+
 
