@@ -483,3 +483,134 @@ method hudson.tasks.Mailer$UserProperty getAddress
 method hudson.model.User getDisplayName
 method hudson.model.Cause$UserIdCause getUserId
 method hudson.model.AbstractBuild getCause
+
+
+---------------------------------
+    =================================
+
+    updateglobalcounterfile
+def call(def countValReset) {
+
+    def envProperty = loadEnvironmentProperties()
+
+    def counterFile             = envProperty.fortify_global_counter_file
+    def fortifyApiToken         = envProperty.fortify_api_credential_id
+    def fortifyApiURL           = envProperty.fortify_api_url
+    def pendingJobThreshold     = envProperty.fortify_count_threshold as Integer
+    def notificationEnabled     = (envProperty.fotify_notification_enabled ?: "true").toBoolean()
+
+    if (!notificationEnabled) {
+        println "INFO: Fortify Team Notification is DISABLED. Skipping notification processing."
+        return
+    }
+
+    def notified = false
+    def notifiedEntry = null
+
+    // ---------------------------------------------------
+    // READ EXISTING COUNTER FILE (notified-true/false)
+    // ---------------------------------------------------
+    if (fileExists(counterFile)) {
+
+        def props = readFile(counterFile).readLines()
+
+        notifiedEntry = props.find { it?.trim()?.startsWith("notified-") }
+
+        if (notifiedEntry) {
+            notified = notifiedEntry.split("-")[1].toBoolean()
+            println "INFO: Previous notification state detected: notified-${notified}"
+        } else {
+            println "WARN: Notification status missing. Using default: notified-false"
+        }
+
+    } else {
+        println "WARN: No global counter file found. Creating a new one."
+        writeFile(file: counterFile, text: "notified-false\n")
+    }
+
+
+    // ---------------------------------------------------
+    // NEW LOGIC:
+    // Send ONLY one notification during failures.
+    // Reset only when success.
+    // ---------------------------------------------------
+
+    def fortifyScanCount = getFortifyPendingJobsCount(fortifyApiToken, fortifyApiURL)
+    println "INFO: Fortify scan pending count = ${fortifyScanCount}"
+
+    // FAILURE case
+    if (fortifyScanCount > pendingJobThreshold) {
+
+        if (!notified) {
+            println "INFO: Pending job threshold exceeded (Count: ${fortifyScanCount}, Threshold: ${pendingJobThreshold}). Triggering notification."
+            notifyTeamsChannel()
+
+            notified = true
+            writeFile(file: counterFile, text: "notified-${notified}\n")
+
+        } else {
+            println "INFO: Already notified earlier. Skipping duplicate notification."
+        }
+
+    } else {
+        // SUCCESS case → Reset state
+        if (notified) {
+            println "INFO: Fortify job count back to normal. Resetting notification flag."
+        }
+
+        notified = false
+        writeFile(file: counterFile, text: "notified-${notified}\n")
+    }
+
+
+    println "INFO: Global counter file updated successfully."
+}
+
+
+
+// =====================================================
+// Helper Method
+// =====================================================
+
+def getFortifyPendingJobsCount(def fortifyApiToken, def fortifyApiURL) {
+
+    withCredentials([string(credentialsId: fortifyApiToken, variable: 'credentials')]) {
+
+        def scanResponse = sh(
+            script: """curl -ks -H 'Authorization: FortifyToken ${credentials}' '${fortifyApiURL}/cloudjobs?fields=jobState&q=jobState:PENDING'""",
+            returnStdout: true
+        ).trim()
+
+        def jsonResponse = readJSON text: scanResponse
+
+        def jobsCount = jsonResponse.count ?: 0
+
+        println "INFO: Pending jobs count in Fortify: ${jobsCount}"
+
+        return jobsCount
+    }
+}
+==============================================================================
+
+    @Library('your-shared-library-name') _
+
+pipeline {
+    agent any
+
+    stages {
+
+        stage('Test Update Global Counter File') {
+            steps {
+                script {
+                    println "=== Running POC for Fortify Notification Logic ==="
+
+                    // Call your shared library function EXACTLY as Dev pipeline does
+                    updateGlobalCounterFile("resetWithNotification")
+
+                    println "=== POC Completed ==="
+                }
+            }
+        }
+    }
+}
+
