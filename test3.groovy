@@ -489,7 +489,7 @@ method hudson.model.AbstractBuild getCause
     =================================
 
     updateglobalcounterfile
-def call(def countValReset) {
+def call(def countValReset, def mockCount = null) {
 
     def envProperty = loadEnvironmentProperties()
 
@@ -505,66 +505,44 @@ def call(def countValReset) {
     }
 
     def notified = false
-    def notifiedEntry = null
 
-    // ---------------------------------------------------
-    // READ EXISTING COUNTER FILE (notified-true/false)
-    // ---------------------------------------------------
     if (fileExists(counterFile)) {
-
-        def props = readFile(counterFile).readLines()
-
-        notifiedEntry = props.find { it?.trim()?.startsWith("notified-") }
-
-        if (notifiedEntry) {
-            notified = notifiedEntry.split("-")[1].toBoolean()
-            println "INFO: Previous notification state detected: notified-${notified}"
-        } else {
-            println "WARN: Notification status missing. Using default: notified-false"
+        def line = readFile(counterFile).trim()
+        if (line.startsWith("notified-")) {
+            notified = line.split("-")[1].toBoolean()
         }
-
+        println "INFO: Previous notification state = ${notified}"
     } else {
-        println "WARN: No global counter file found. Creating a new one."
+        println "WARN: Counter file not found. Creating new one."
         writeFile(file: counterFile, text: "notified-false\n")
     }
 
+    // ⭐ USE MOCK VALUE IF PROVIDED (for POC testing)
+    def fortifyScanCount = (mockCount != null)
+        ? mockCount
+        : getFortifyPendingJobsCount(fortifyApiToken, fortifyApiURL)
 
-    // ---------------------------------------------------
-    // NEW LOGIC:
-    // Send ONLY one notification during failures.
-    // Reset only when success.
-    // ---------------------------------------------------
-
-    def fortifyScanCount = getFortifyPendingJobsCount(fortifyApiToken, fortifyApiURL)
-    println "INFO: Fortify scan pending count = ${fortifyScanCount}"
+    println "INFO: Fortify pending job count = ${fortifyScanCount}"
 
     // FAILURE case
     if (fortifyScanCount > pendingJobThreshold) {
 
         if (!notified) {
-            println "INFO: Pending job threshold exceeded (Count: ${fortifyScanCount}, Threshold: ${pendingJobThreshold}). Triggering notification."
+            println "INFO: First failure → sending notification"
             notifyTeamsChannel()
-
-            notified = true
-            writeFile(file: counterFile, text: "notified-${notified}\n")
-
+            writeFile(file: counterFile, text: "notified-true\n")
         } else {
-            println "INFO: Already notified earlier. Skipping duplicate notification."
+            println "INFO: Already notified earlier → skipping"
         }
 
-    } else {
-        // SUCCESS case → Reset state
-        if (notified) {
-            println "INFO: Fortify job count back to normal. Resetting notification flag."
-        }
-
-        notified = false
-        writeFile(file: counterFile, text: "notified-${notified}\n")
+        return
     }
 
-
-    println "INFO: Global counter file updated successfully."
+    // SUCCESS case → reset
+    println "INFO: Fortify job count normal → resetting state"
+    writeFile(file: counterFile, text: "notified-false\n")
 }
+
 
 
 
@@ -592,6 +570,23 @@ def getFortifyPendingJobsCount(def fortifyApiToken, def fortifyApiURL) {
 }
 ==============================================================================
 
+ properties([
+    parameters([
+        choice(
+            name: 'SCENARIO',
+            choices: ['FAILURE', 'SUCCESS', 'NORMAL'],
+            description: 'Choose POC scenario'
+        ),
+        string(
+            name: 'MOCK_COUNT',
+            defaultValue: '0',
+            description: 'Simulated Fortify pending job count'
+        )
+    ])
+])
+
+=============================
+    
     @Library('your-shared-library-name') _
 
 pipeline {
@@ -599,18 +594,51 @@ pipeline {
 
     stages {
 
-        stage('Test Update Global Counter File') {
+        stage('Run Fortify Notification POC') {
             steps {
                 script {
-                    println "=== Running POC for Fortify Notification Logic ==="
 
-                    // Call your shared library function EXACTLY as Dev pipeline does
-                    updateGlobalCounterFile("resetWithNotification")
+                    println "===== FORTIFY NOTIFICATION POC START ====="
+                    println "SCENARIO selected = ${params.SCENARIO}"
+                    println "MOCK fortifyScanCount = ${params.MOCK_COUNT}"
 
-                    println "=== POC Completed ==="
+                    def mockCount = params.MOCK_COUNT as Integer
+
+                    if (params.SCENARIO == 'FAILURE') {
+
+                        // FAILURE → Check notification logic
+                        updateGlobalCounter("runCheck", mockCount)
+
+                        // Simulated failure
+                        error("Simulated FAILURE for testing")
+
+                    } else if (params.SCENARIO == 'SUCCESS') {
+
+                        // SUCCESS → Reset notification state
+                        updateGlobalCounter("resetWithoutNotification")
+
+                    } else {
+
+                        // NORMAL case — just run logic, no failure
+                        updateGlobalCounter("runCheck", mockCount)
+                    }
                 }
             }
         }
     }
-}
 
+    post {
+        success {
+            script {
+                println "POC SUCCESS → Resetting notified flag"
+                updateGlobalCounter("resetWithoutNotification")
+            }
+        }
+        failure {
+            script {
+                println "POC FAILURE → Running failure flag check again"
+                updateGlobalCounter("runCheck", params.MOCK_COUNT as Integer)
+            }
+        }
+    }
+}
