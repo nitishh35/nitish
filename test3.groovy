@@ -580,65 +580,69 @@ def getFortifyPendingJobsCount(def fortifyApiToken, def fortifyApiURL) {
         string(
             name: 'MOCK_COUNT',
             defaultValue: '0',
-            description: 'Simulated Fortify pending job count'
+            description: 'Simulated fortifyScanCount for testing'
         )
     ])
 ])
 
-=============================
-    
-    @Library('your-shared-library-name') _
+node('any') {
 
-pipeline {
-    agent any
+    ansiColor('xterm') {
 
-    stages {
+        try {
 
-        stage('Run Fortify Notification POC') {
-            steps {
-                script {
+            println "============== FORTIFY POC TEST START =============="
+            println "Selected Scenario       : ${params.SCENARIO}"
+            println "Mock Fortify Count      : ${params.MOCK_COUNT}"
+            println "==================================================="
 
-                    println "===== FORTIFY NOTIFICATION POC START ====="
-                    println "SCENARIO selected = ${params.SCENARIO}"
-                    println "MOCK fortifyScanCount = ${params.MOCK_COUNT}"
+            // Convert to integer
+            def mockCount = params.MOCK_COUNT as Integer
 
-                    def mockCount = params.MOCK_COUNT as Integer
+            stage('POC: Run Scenario') {
 
-                    if (params.SCENARIO == 'FAILURE') {
+                if (params.SCENARIO == 'FAILURE') {
 
-                        // FAILURE → Check notification logic
-                        updateGlobalCounter("runCheck", mockCount)
+                    println "POC → Simulating FAILURE scenario"
+                    updateGlobalCounter("runCheck", mockCount)
 
-                        // Simulated failure
-                        error("Simulated FAILURE for testing")
+                    // Fail the build on purpose
+                    error("Simulated failure for POC testing")
 
-                    } else if (params.SCENARIO == 'SUCCESS') {
+                } else if (params.SCENARIO == 'SUCCESS') {
 
-                        // SUCCESS → Reset notification state
-                        updateGlobalCounter("resetWithoutNotification")
+                    println "POC → Simulating SUCCESS scenario (reset notification)"
+                    updateGlobalCounter("resetWithoutNotification")
 
-                    } else {
+                } else {
 
-                        // NORMAL case — just run logic, no failure
-                        updateGlobalCounter("runCheck", mockCount)
-                    }
+                    println "POC → Simulating NORMAL scenario (no threshold breach)"
+                    updateGlobalCounter("runCheck", mockCount)
                 }
             }
-        }
-    }
 
-    post {
-        success {
-            script {
-                println "POC SUCCESS → Resetting notified flag"
-                updateGlobalCounter("resetWithoutNotification")
-            }
-        }
-        failure {
-            script {
-                println "POC FAILURE → Running failure flag check again"
-                updateGlobalCounter("runCheck", params.MOCK_COUNT as Integer)
-            }
+            println "POC Completed Successfully"
+
+        } catch (err) {
+
+            println "=========== FAILURE HANDLING BLOCK ==========="
+
+            println "Build failed → Executing failure logic"
+            def mockCount = params.MOCK_COUNT as Integer
+            updateGlobalCounter("runCheck", mockCount)
+
+            // Re-throw error so Jenkins marks build as failed
+            throw err
+
+        } finally {
+
+            println "=========== FINALLY BLOCK EXECUTED ==========="
+            println "Sending Final Teams Notification (if applicable)"
+
+            sendTeamsNotification()
+
+            println "============== POC TEST END =============="
         }
     }
 }
+
