@@ -187,3 +187,131 @@ If you want, I can also show you:
 ### ✔ How to simulate multiple failures in one run
 
 Just say **"show integration example"**.
+===========================================
+
+
+
+
+
+
+
+### ✔️ YES — you can **safely comment out `sendTeamsNotification()`** in the POC job.
+
+In fact, for Fortify notification testing, **you SHOULD disable it** because:
+
+* It uses many fields (`buildStatus`, `env.failedStage`, user details)
+* These values are **not initialized in the POC**
+* So the function throws errors like:
+
+  ```
+  Cannot invoke method equalsIgnoreCase() on null object
+  ```
+* You ONLY need to test **Fortify one-time failure notification logic**, not Teams notification logic.
+
+---
+
+# ⭐ ✔️ What to Comment Out
+
+In your POC Jenkinsfile, simply comment this line:
+
+```groovy
+// sendTeamsNotification()
+```
+
+Inside the finally block:
+
+```groovy
+finally {
+    println "== FINALLY BLOCK EXECUTED =="
+
+    // COMMENT OUT THIS FOR POC
+    // sendTeamsNotification()
+
+    println "========= POC TEST END ========="
+}
+```
+
+---
+
+# ⭐ Result After Commenting
+
+### 😊 What works:
+
+✔ `updateGlobalCounterFile("runCheck", mockCount)`
+✔ `mockCount` successfully overrides `fortifyScanCount`
+✔ ONE alert sent only for first failure
+✔ No alert sent for repeated failures
+✔ Alert sent again only after success reset
+
+### ❌ What will not run (but we don’t care in POC):
+
+* Teams notifications
+* Status messages to product channels
+
+---
+
+# ⭐ For Your Test Objective
+
+Your goal:
+
+> **Send ONLY one notification when Fortify pending scan > threshold,
+> then only send again after success reset.**
+
+This test works perfectly **without** Teams notifications.
+
+---
+
+# ⭐ If you want complete verification steps:
+
+### Test 1 — First Failure
+
+Run:
+
+* SCENARIO = FAILURE
+* MOCK_COUNT = 20 (assuming threshold is 10)
+
+Expected:
+
+```
+INFO: First failure → sending notification
+INFO: notified-true
+```
+
+### Test 2 — Second Failure
+
+Run same values again.
+
+Expected:
+
+```
+INFO: Already notified earlier → skipping
+```
+
+### Test 3 — Success
+
+Run:
+
+* SCENARIO = SUCCESS
+  Expected:
+
+```
+INFO: Resetting notification flag → notified-false
+```
+
+### Test 4 — Next Failure
+
+Run:
+
+* SCENARIO = FAILURE
+* MOCK_COUNT = 20
+
+Expected:
+
+```
+INFO: First failure → sending notification
+```
+
+---
+
+# ⭐ If you want I can update your entire POC Jenkinsfile (clean, fixed, ready to paste).
+
