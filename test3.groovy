@@ -645,4 +645,100 @@ node('any') {
         }
     }
 }
+==========================================
+
+    update script for updateglobalcounterfile
+
+def call(def countValReset) {
+
+    def envProperty = loadEnvironmentProperties()
+
+    def counterFile         = envProperty.fortify_global_counter_file
+    def fortifyApiToken     = envProperty.fortify_api_credential_id
+    def fortifyApiURL       = envProperty.fortify_api_url
+    def pendingJobThreshold = envProperty.fortify_count_threshold as Integer
+    def notificationEnabled = (envProperty.fotify_notification_enabled ?: "true").toBoolean()
+
+    if (!notificationEnabled) {
+        println "INFO: Fortify Team Notification is DISABLED. Skipping notification."
+        return
+    }
+
+    // ------------------------------------------------
+    // Load previous notification state
+    // ------------------------------------------------
+    def notified = false
+
+    if (fileExists(counterFile)) {
+        def line = readFile(counterFile).trim()
+
+        if (line.startsWith("notified-")) {
+            notified = line.split("-")[1].toBoolean()
+            println "INFO: Previous notification state = ${notified}"
+        } else {
+            println "WARN: Counter file invalid. Resetting to notified-false"
+            writeFile(file: counterFile, text: "notified-false\n")
+        }
+
+    } else {
+        println "WARN: Counter file not found → creating new one"
+        writeFile(file: counterFile, text: "notified-false\n")
+    }
+
+    // ------------------------------------------------
+    // REAL Fortify API Call → fetch pending job count
+    // ------------------------------------------------
+    def fortifyScanCount = getFortifyPendingJobsCount(fortifyApiToken, fortifyApiURL)
+    println "INFO: Fortify pending job count = ${fortifyScanCount}"
+
+    // ------------------------------------------------
+    // CASE 1 → FAILURE (count > threshold)
+    // ------------------------------------------------
+    if (fortifyScanCount > pendingJobThreshold) {
+
+        if (!notified) {
+            println "INFO: Threshold exceeded. FIRST FAILURE → Sending Teams Notification"
+            notifyTeamsChannel()
+
+            writeFile(file: counterFile, text: "notified-true\n")
+        } else {
+            println "INFO: Threshold exceeded but already notified earlier → Skipping notify"
+        }
+
+        return
+    }
+
+    // ------------------------------------------------
+    // CASE 2 → SUCCESS (count <= threshold)
+    // Reset notification flag
+    // ------------------------------------------------
+    println "INFO: Pending count normal → resetting notification state"
+    writeFile(file: counterFile, text: "notified-false\n")
+}
+
+
+
+// =====================================================================
+// REAL Fortify API Call
+// =====================================================================
+def getFortifyPendingJobsCount(def fortifyApiToken, def fortifyApiURL) {
+
+    withCredentials([string(credentialsId: fortifyApiToken, variable: 'credentials')]) {
+
+        def scanResponse = sh(
+            script: """
+                curl -ks -H 'Authorization: FortifyToken ${credentials}' \
+                '${fortifyApiURL}/cloudjobs?fields=jobState&q=jobState:PENDING'
+            """,
+            returnStdout: true
+        ).trim()
+
+        def jsonResponse = readJSON text: scanResponse
+        def jobsCount = jsonResponse.count ?: 0
+
+        println "INFO: Fortify pending jobs = ${jobsCount}"
+        return jobsCount
+    }
+}
+
 
