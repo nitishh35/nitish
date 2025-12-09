@@ -1,3 +1,100 @@
+inset key for pipleine url.for fortifyteam notification 
+def call() {
+
+    def envProperty = loadEnvironmentProperties()
+
+    def devopsWorkFlowUrl      = envProperty.devops_workflow_url
+    def fortifyWorkFlowUrl     = envProperty.fortify_workflow_url
+    def emailAddressList       = envProperty.to_email_address_list
+    def fortifyChannelEmails   = envProperty.fortify_channel_emails_json
+
+    def pipelineUrl = env.BUILD_URL ?: ""
+
+    // ------------------------------------------------------------
+    // DEVOPS JSON (pipelineUrl added INSIDE createEmailJson)
+    // ------------------------------------------------------------
+    def baseDevOpsJson = createEmailJson(emailAddressList, pipelineUrl)
+
+    println "INFO: DevOps JSON to send: ${baseDevOpsJson}"
+
+    def escapedDevOpsJson = baseDevOpsJson.replace("'", "'\\\\''")
+
+    def devopsChannelResponseCode = sh(
+            script: """curl -s -o /dev/null -w '%{http_code}' \
+                -H 'Content-Type: application/json' \
+                -H 'Accept: application/json' \
+                -X POST '${devopsWorkFlowUrl}' \
+                -d '${escapedDevOpsJson}'""",
+            returnStdout: true
+    ).trim()
+
+    println "INFO: DevOps Teams channel response code: ${devopsChannelResponseCode}"
+
+
+    // ------------------------------------------------------------
+    // FORTIFY JSON (NOW USING SAFE PARSE + ADD KEY, NO .replace)
+    // ------------------------------------------------------------
+    def enrichedFortifyJson = createFortifyJson(fortifyChannelEmails, pipelineUrl)
+
+    println "INFO: Fortify JSON to send: ${enrichedFortifyJson}"
+
+    def escapedFortifyJson = enrichedFortifyJson.replace("'", "'\\\\''")
+
+    def fortifyChannelResponseCode = sh(
+            script: """curl -s -o /dev/null -w '%{http_code}' \
+                -H 'Content-Type: application/json' \
+                -H 'Accept: application/json' \
+                -X POST '${fortifyWorkFlowUrl}' \
+                -d '${escapedFortifyJson}'""",
+            returnStdout: true
+    ).trim()
+
+    println "INFO: Fortify support channel response code: ${fortifyChannelResponseCode}"
+}
+
+
+// ==================================================================
+// FUNCTION 1: Build DevOps JSON with emails + pipelineUrl
+// ==================================================================
+def createEmailJson(def emailAddressList, def pipelineUrl) {
+
+    def emails = emailAddressList.split(',').collect { it.trim() }
+    def emailMap = [:]
+
+    emails.eachWithIndex { email, index ->
+        emailMap["email${index + 1}"] = email
+    }
+
+    // Add pipeline URL (Manager Request)
+    emailMap["pipelineUrl"] = pipelineUrl
+
+    def jsonString = groovy.json.JsonOutput.toJson(emailMap)
+
+    println "INFO: Email JSON created: ${jsonString}"
+
+    return jsonString
+}
+
+
+// ==================================================================
+// FUNCTION 2: Build Fortify JSON SAFELY (parse + add key)
+// ==================================================================
+def createFortifyJson(def fortifyChannelEmails, def pipelineUrl) {
+
+    // Convert Fortify JSON string → Map
+    def fortifyMap = new groovy.json.JsonSlurper().parseText(fortifyChannelEmails)
+
+    // Add pipeline URL
+    fortifyMap["pipelineUrl"] = pipelineUrl
+
+    // Convert Map → JSON string
+    def jsonString = groovy.json.JsonOutput.toJson(fortifyMap)
+
+    println "INFO: Fortify JSON created: ${jsonString}"
+
+    return jsonString
+}
+==========≠=====================
 def call() {
     def envProperty = loadEnvironmentProperties()
 
