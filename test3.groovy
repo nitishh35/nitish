@@ -13,22 +13,34 @@ def call() {
     println "INFO: DevOps JSON to send: ${baseDevOpsJson}"
     def escapedDevOpsJson = baseDevOpsJson.replace("'", "'\\''")
     
-    def devopsChannelResponseCode = sh(
-        script: "curl -s -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' -H 'Accept: application/json' -X POST '${devopsWorkFlowUrl}' -d '${escapedDevOpsJson}'",
+    def devopsChannelResponse = sh(
+        script: "curl -s -w '\\n%{http_code}' -H 'Content-Type: application/json' -H 'Accept: application/json' -X POST '${devopsWorkFlowUrl}' -d '${escapedDevOpsJson}'",
         returnStdout: true
     ).trim()
-    println "INFO: DevOps Teams channel response code: ${devopsChannelResponseCode}"
+    
+    def devopsLines = devopsChannelResponse.split('\n')
+    def devopsResponseBody = devopsLines.size() > 1 ? devopsLines[0..-2].join('\n') : ''
+    def devopsResponseCode = devopsLines[-1]
+    
+    println "INFO: DevOps Teams channel response code: ${devopsResponseCode}"
+    println "INFO: DevOps Teams channel response body: ${devopsResponseBody}"
     
     // Create JSON for Fortify channel
     def enrichedFortifyJson = createChannelJson(fortifyChannelEmails, pipelineUrl)
     println "INFO: Fortify JSON to send: ${enrichedFortifyJson}"
     def escapedFortifyJson = enrichedFortifyJson.replace("'", "'\\''")
     
-    def fortifyChannelResponseCode = sh(
-        script: "curl -s -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' -H 'Accept: application/json' -X POST '${fortifyWorkFlowUrl}' -d '${escapedFortifyJson}'",
+    def fortifyChannelResponse = sh(
+        script: "curl -s -w '\\n%{http_code}' -H 'Content-Type: application/json' -H 'Accept: application/json' -X POST '${fortifyWorkFlowUrl}' -d '${escapedFortifyJson}'",
         returnStdout: true
     ).trim()
-    println "INFO: Fortify support channel response code: ${fortifyChannelResponseCode}"
+    
+    def fortifyLines = fortifyChannelResponse.split('\n')
+    def fortifyResponseBody = fortifyLines.size() > 1 ? fortifyLines[0..-2].join('\n') : ''
+    def fortifyResponseCode = fortifyLines[-1]
+    
+    println "INFO: Fortify support channel response code: ${fortifyResponseCode}"
+    println "INFO: Fortify support channel response body: ${fortifyResponseBody}"
 }
 
 def createChannelJson(def emailInput, def pipelineUrl) {
@@ -45,9 +57,11 @@ def createChannelJson(def emailInput, def pipelineUrl) {
         emails = [emailInput.toString()]
     }
     
-    // Create email keys dynamically
-    emails.eachWithIndex { email, index ->
-        emailMap["email${index + 1}"] = email
+    // Create email keys dynamically using standard for loop with counter
+    int counter = 1
+    for (String e : emails) {
+        emailMap.put("email" + counter, e)
+        counter++
     }
     
     // Add pipeline URL
