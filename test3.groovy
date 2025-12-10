@@ -35,57 +35,63 @@ def call() {
         
         if (channelUrl) {
             notifyTeam(buildDataJson, channelUrl)
-        } else {
-            println "WARN: No channel URL found, skipping Teams notification"
         }
     } catch (Exception e) {
         println "ERROR: Failed to send Teams notification: ${e.message}"
-        e.printStackTrace()
     }
 }
 
 def getProductWorkflowChannelUrl() {
-    try {
-        def content = libraryResource('pipeline-global-config/workflow-urls.properties')
-        def props = readProperties text: content
-        def buildUrl = env.BUILD_URL ?: ""
-        def productName = ""
-        
-        // Check for API-Products folder
-        def apiProductsMatcher = buildUrl =~ /\/job\/API-Products\/job\/([^\/]+)/
-        if (apiProductsMatcher.find()) {
-            productName = "API-Products"
-            println "INFO: API-Products folder detected in build URL"
-        } 
-        // Check for Common-Framework folder
-        else {
-            def commonFrameworkMatcher = buildUrl =~ /\/job\/Common-Framework\/job\/([^\/]+)/
-            if (commonFrameworkMatcher.find()) {
-                productName = "Common-Framework"
-                println "INFO: Common-Framework folder detected in build URL"
-            } else {
-                println "WARN: Skipping team notification for this build, unable to extract the capability folder name from the URL: ${buildUrl}"
-                return null
-            }
-        }
-        
+    def content = libraryResource('pipeline-global-config/workflow-urls.properties')
+    def props = readProperties text: content
+    def buildUrl = env.BUILD_URL ?: ""
+    
+    // Check for Common-Framework first
+    def commonFrameworkMatcher = buildUrl =~ /\/job\/Common-Framework\/job\/([^\/]+)/
+    if (commonFrameworkMatcher.find()) {
+        def productName = "Common-Framework"
+        println "INFO: Common-Framework folder detected"
         def channelUrl = props[productName]
-        
         if (channelUrl) {
-            println "INFO: Channel URL found for ${productName}: ${channelUrl}"
+            println "INFO: Channel URL found for Common-Framework"
             return channelUrl
         } else {
-            println "WARN: No channel URL configured in properties file for: ${productName}"
-            println "WARN: Available properties keys: ${props.keySet()}"
+            println "WARN: No channel URL configured for Common-Framework"
             return null
         }
-    } catch (Exception e) {
-        println "ERROR: Failed to get channel URL: ${e.message}"
-        e.printStackTrace()
+    }
+    
+    // Existing API-Products logic (unchanged)
+    def matcher = buildUrl =~ /\/job\/API-Products\/job\/([^\/]+)/
+    def productName = ""
+    
+    if (matcher.find()) {
+        productName = matcher.group(1)  // Extract specific job name like "Alerts", "CustID", etc.
+        println "INFO: API-Products detected: ${productName}"
+    } else {
+        println "WARN: Skipping team notification for this build, unable to extract the capability folder name from the URL: ${buildUrl}"
+        return null
+    }
+    
+    def channelUrl = props[productName]
+    
+    if (channelUrl) {
+        println "INFO: Channel URL found for ${productName}"
+        return channelUrl
+    } else {
+        println "WARN: No channel URL configured for ${productName}"
         return null
     }
 }
 
+def notifyTeam(def buildDataJson, def channelUrl) {
+    def responseCode = sh(
+        script: "curl -k -w '%{http_code}' -H 'Content-Type: application/json' -H 'Accept: application/json' -X POST '${channelUrl}' -d '${buildDataJson}' -o /dev/null -s",
+        returnStdout: true
+    ).trim()
+    
+    println "INFO: The received HTTP response code from DevOps teams channel curl request: ${responseCode}"
+}
 def notifyTeam(def buildDataJson, def channelUrl) {
     try {
         def responseCode = sh(
