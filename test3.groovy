@@ -1,3 +1,97 @@
+sendteamnotifcation
+
+def call() {
+    try {
+        def buildStatus = currentBuild.result
+        def stageName = "NA"
+        if (currentBuild.result.equalsIgnoreCase("FAILURE")) {
+            stageName = env.failedStage
+        }
+        def userInfo = getBuildTriggeredUserDetails()
+        def buildTriggeredUserEmailId = userInfo.userEmail
+        def buildTriggeredUserName = userInfo.userName
+        
+        if (buildTriggeredUserName == 'SVC-APP-RLCT') {
+            println "INFO: Notification suppressed for service account user: ${buildTriggeredUserName}"
+            return
+        }
+        
+        def buildData = [:]
+        buildData["pipelineURL"] = env.BUILD_URL
+        buildData["triggerdBy"] = buildTriggeredUserName
+        buildData["triggerdByEmail"] = buildTriggeredUserEmailId
+        buildData["status"] = buildStatus
+        
+        if (buildStatus == "FAILURE") {
+            buildData["stage"] = stageName
+        } else {
+            buildData["stage"] = "NA"
+        }
+        
+        def buildDataJson = groovy.json.JsonOutput.toJson(buildData)
+        def channelUrl = getProductWorkflowChannelUrl()
+        
+        if (channelUrl) {
+            notifyTeam(buildDataJson, channelUrl)
+        } else {
+            println "WARN: No channel URL found, notification not sent"
+        }
+    } catch (Exception e) {
+        println "ERROR: Failed to send Teams notification: ${e.message}"
+        e.printStackTrace()
+    }
+}
+
+def getProductWorkflowChannelUrl() {
+    try {
+        def content = libraryResource('pipeline-global-config/workflow-urls.properties')
+        def props = readProperties text: content
+        def buildUrl = env.BUILD_URL ?: ""
+        def productName = ""
+        
+        // Match API-Products pattern
+        if (buildUrl =~ /\/job\/API-Products\/job\/([^\/]+)\//) {
+            productName = "API-Products"
+            println "INFO: API-Products detected: ${productName}"
+        } 
+        // Match Common-Framework pattern
+        else if (buildUrl =~ /\/job\/Common-Framework\/job\/([^\/]+)\//) {
+            productName = "Common-Framework"
+            println "INFO: Common-Framework detected: ${productName}"
+        } 
+        else {
+            println "WARN: No matching folder found in ${buildUrl}"
+            return null
+        }
+        
+        def channelUrl = props[productName]
+        
+        if (channelUrl) {
+            println "INFO: Channel URL found for ${productName}: ${channelUrl}"
+            return channelUrl
+        } else {
+            println "WARN: No channel URL configured for product: ${productName}"
+            return null
+        }
+    } catch (Exception e) {
+        println "ERROR: Failed to get channel URL: ${e.message}"
+        e.printStackTrace()
+        return null
+    }
+}
+
+def notifyTeam(def buildDataJson, def channelUrl) {
+    def responseCode = sh(
+        script: "curl -k -w '%{http_code}' -H 'Content-Type: application/json' -H 'Accept: application/json' -X POST '${channelUrl}' -d '${buildDataJson}' -o /dev/null -s",
+        returnStdout: true
+    ).trim()
+    
+    println "INFO: The received HTTP response code from DevOps teams channel curl request: ${responseCode}"
+}
+==========================================
+    ===================
+    ===============
+
 inset key for pipleine url.for fortifyteam notification 
 def call() {
 
