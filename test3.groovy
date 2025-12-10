@@ -66,7 +66,7 @@ def getProductWorkflowChannelUrl() {
     def productName = ""
     
     if (matcher.find()) {
-        productName = matcher.group(1)  // Extract specific job name like "Alerts", "CustID", etc.
+        productName = matcher.group(1)
         println "INFO: API-Products detected: ${productName}"
     } else {
         println "WARN: Skipping team notification for this build, unable to extract the capability folder name from the URL: ${buildUrl}"
@@ -91,30 +91,6 @@ def notifyTeam(def buildDataJson, def channelUrl) {
     ).trim()
     
     println "INFO: The received HTTP response code from DevOps teams channel curl request: ${responseCode}"
-}
-def notifyTeam(def buildDataJson, def channelUrl) {
-    try {
-        def responseCode = sh(
-            script: """
-                curl -k -w '%{http_code}' \
-                -H 'Content-Type: application/json' \
-                -H 'Accept: application/json' \
-                -X POST '${channelUrl}' \
-                -d '${buildDataJson}' \
-                -o /dev/null -s
-            """,
-            returnStdout: true
-        ).trim()
-        
-        println "INFO: The received HTTP response code from DevOps teams channel curl request: ${responseCode}"
-        
-        if (responseCode != "200") {
-            println "WARN: Teams notification may have failed. Response code: ${responseCode}"
-        }
-    } catch (Exception e) {
-        println "ERROR: Failed to send Teams notification via curl: ${e.message}"
-        e.printStackTrace()
-    }
 }
 ==========================================
     ===================
