@@ -1,3 +1,63 @@
+notifyteamchannel
+
+def call() {
+    def envProperty = loadEnvironmentProperties()
+    def devopsWorkFlowUrl = envProperty.devops_workflow_url
+    def fortifyWorkFlowUrl = envProperty.fortify_workflow_url
+    def emailAddressList = envProperty.to_email_address_list
+    def fortifyChannelEmails = envProperty.fortify_channel_emails_json
+    def pipelineUrl = env.BUILD_URL ?: ""
+    
+    // Create JSON for DevOps channel
+    def baseDevOpsJson = createChannelJson(emailAddressList, pipelineUrl)
+    println "INFO: DevOps JSON to send: ${baseDevOpsJson}"
+    def escapedDevOpsJson = baseDevOpsJson.replace("'", "'\\''")
+    
+    def devopsChannelResponseCode = sh(
+        script: "curl -s -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' -H 'Accept: application/json' -X POST '${devopsWorkFlowUrl}' -d '${escapedDevOpsJson}'",
+        returnStdout: true
+    ).trim()
+    println "INFO: DevOps Teams channel response code: ${devopsChannelResponseCode}"
+    
+    // Create JSON for Fortify channel
+    def enrichedFortifyJson = createChannelJson(fortifyChannelEmails, pipelineUrl)
+    println "INFO: Fortify JSON to send: ${enrichedFortifyJson}"
+    def escapedFortifyJson = enrichedFortifyJson.replace("'", "'\\''")
+    
+    def fortifyChannelResponseCode = sh(
+        script: "curl -s -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' -H 'Accept: application/json' -X POST '${fortifyWorkFlowUrl}' -d '${escapedFortifyJson}'",
+        returnStdout: true
+    ).trim()
+    println "INFO: Fortify support channel response code: ${fortifyChannelResponseCode}"
+}
+
+def createChannelJson(def emailInput, def pipelineUrl) {
+    def emailMap = [:]
+    def emails = []
+    
+    // Check if input is a comma-separated string or already a list
+    if (emailInput instanceof String) {
+        emails = emailInput.split(',').collect { it.trim() }
+    } else if (emailInput instanceof List) {
+        emails = emailInput
+    } else {
+        println "WARN: Unexpected email input type: ${emailInput.getClass()}"
+        emails = [emailInput.toString()]
+    }
+    
+    // Create email keys dynamically
+    emails.eachWithIndex { email, index ->
+        emailMap["email${index + 1}"] = email
+    }
+    
+    // Add pipeline URL
+    emailMap["pipelineUrl"] = pipelineUrl
+    
+    def jsonString = groovy.json.JsonOutput.toJson(emailMap)
+    println "INFO: Channel JSON created: ${jsonString}"
+    return jsonString
+}
+=========================================================================================================
 sendteamnotifcation
 
 def call() {
