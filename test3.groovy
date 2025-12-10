@@ -4,9 +4,11 @@ def call() {
     try {
         def buildStatus = currentBuild.result
         def stageName = "NA"
+        
         if (currentBuild.result.equalsIgnoreCase("FAILURE")) {
             stageName = env.failedStage
         }
+        
         def userInfo = getBuildTriggeredUserDetails()
         def buildTriggeredUserEmailId = userInfo.userEmail
         def buildTriggeredUserName = userInfo.userName
@@ -24,7 +26,7 @@ def call() {
         
         if (buildStatus == "FAILURE") {
             buildData["stage"] = stageName
-        } else {
+        } else if (buildStatus == "SUCCESS" || buildStatus == "ABORTED" || buildStatus == "UNSTABLE") {
             buildData["stage"] = "NA"
         }
         
@@ -34,7 +36,7 @@ def call() {
         if (channelUrl) {
             notifyTeam(buildDataJson, channelUrl)
         } else {
-            println "WARN: No channel URL found, notification not sent"
+            println "WARN: No channel URL found, skipping Teams notification"
         }
     } catch (Exception e) {
         println "ERROR: Failed to send Teams notification: ${e.message}"
@@ -49,19 +51,22 @@ def getProductWorkflowChannelUrl() {
         def buildUrl = env.BUILD_URL ?: ""
         def productName = ""
         
-        // Match API-Products pattern
-        if (buildUrl =~ /\/job\/API-Products\/job\/([^\/]+)\//) {
+        // Check for API-Products folder
+        def apiProductsMatcher = buildUrl =~ /\/job\/API-Products\/job\/([^\/]+)/
+        if (apiProductsMatcher.find()) {
             productName = "API-Products"
-            println "INFO: API-Products detected: ${productName}"
+            println "INFO: API-Products folder detected in build URL"
         } 
-        // Match Common-Framework pattern
-        else if (buildUrl =~ /\/job\/Common-Framework\/job\/([^\/]+)\//) {
-            productName = "Common-Framework"
-            println "INFO: Common-Framework detected: ${productName}"
-        } 
+        // Check for Common-Framework folder
         else {
-            println "WARN: No matching folder found in ${buildUrl}"
-            return null
+            def commonFrameworkMatcher = buildUrl =~ /\/job\/Common-Framework\/job\/([^\/]+)/
+            if (commonFrameworkMatcher.find()) {
+                productName = "Common-Framework"
+                println "INFO: Common-Framework folder detected in build URL"
+            } else {
+                println "WARN: Skipping team notification for this build, unable to extract the capability folder name from the URL: ${buildUrl}"
+                return null
+            }
         }
         
         def channelUrl = props[productName]
@@ -70,7 +75,8 @@ def getProductWorkflowChannelUrl() {
             println "INFO: Channel URL found for ${productName}: ${channelUrl}"
             return channelUrl
         } else {
-            println "WARN: No channel URL configured for product: ${productName}"
+            println "WARN: No channel URL configured in properties file for: ${productName}"
+            println "WARN: Available properties keys: ${props.keySet()}"
             return null
         }
     } catch (Exception e) {
@@ -81,12 +87,28 @@ def getProductWorkflowChannelUrl() {
 }
 
 def notifyTeam(def buildDataJson, def channelUrl) {
-    def responseCode = sh(
-        script: "curl -k -w '%{http_code}' -H 'Content-Type: application/json' -H 'Accept: application/json' -X POST '${channelUrl}' -d '${buildDataJson}' -o /dev/null -s",
-        returnStdout: true
-    ).trim()
-    
-    println "INFO: The received HTTP response code from DevOps teams channel curl request: ${responseCode}"
+    try {
+        def responseCode = sh(
+            script: """
+                curl -k -w '%{http_code}' \
+                -H 'Content-Type: application/json' \
+                -H 'Accept: application/json' \
+                -X POST '${channelUrl}' \
+                -d '${buildDataJson}' \
+                -o /dev/null -s
+            """,
+            returnStdout: true
+        ).trim()
+        
+        println "INFO: The received HTTP response code from DevOps teams channel curl request: ${responseCode}"
+        
+        if (responseCode != "200") {
+            println "WARN: Teams notification may have failed. Response code: ${responseCode}"
+        }
+    } catch (Exception e) {
+        println "ERROR: Failed to send Teams notification via curl: ${e.message}"
+        e.printStackTrace()
+    }
 }
 ==========================================
     ===================
