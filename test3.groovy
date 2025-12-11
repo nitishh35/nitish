@@ -1,4 +1,97 @@
+/**
+ * MAIN ENTRY (old behavior preserved)
+ * Supports:
+ *   updateGlobalCounterFile("runCheck", 7)
+ *   updateGlobalCounterFile("resetWithoutNotification")
+ */
+def call(def action, Integer mockCount = null) {
 
+    println "INFO: MOCK MODE INVOKED → action=${action}, mockCount=${mockCount}"
+
+    // Normalize action
+    if (action.equalsIgnoreCase("runCheck")) {
+        return runMainLogic(mockCount)
+    }
+
+    if (action.equalsIgnoreCase("resetWithoutNotification") ||
+        action.equalsIgnoreCase("reset")) {
+        return runMainLogic(0)       // reset sets count=0
+    }
+
+    // Default fallback
+    println "WARN: Unknown action '${action}'. Running main logic."
+    return runMainLogic(mockCount)
+}
+
+
+
+/**
+ * MAIN BUSINESS LOGIC
+ */
+def runMainLogic(Integer mockCount) {
+
+    def envProperty = loadEnvironmentProperties()
+    def counterFile = envProperty.fortify_global_counter_file
+    def pendingJobThreshold = envProperty.fortify_count_threshold as Integer
+    def notificationEnabled = (envProperty.fortify_notification_enabled ?: "true").toBoolean()
+
+    if (!notificationEnabled) {
+        println "INFO: Fortify Team Notification is DISABLED. Skipping processing."
+        return
+    }
+
+    //---------------------------------------------------
+    // Load existing notification state (notified-true/false)
+    //---------------------------------------------------
+    def notified = "false"
+
+    if (fileExists(counterFile)) {
+        def line = readFile(counterFile).trim()
+
+        if (line.startsWith("notified-")) {
+            notified = line.split("-")[1]
+            println "INFO: Previous notification state = ${notified}"
+        } else {
+            println "WARN: Invalid counter file. Resetting to notified-false."
+            writeFile(file: counterFile, text: "notified-false\n")
+        }
+
+    } else {
+        println "WARN: Counter file missing. Creating new one."
+        writeFile(file: counterFile, text: "notified-false\n")
+    }
+
+    //---------------------------------------------------
+    // TEST MODE → Use the mock value directly
+    //---------------------------------------------------
+    def fortifyScanCount = (mockCount != null ? mockCount : 0)
+
+    println "INFO: Fortify Scan Count = ${fortifyScanCount}"
+
+    //---------------------------------------------------
+    // FAILURE SCENARIO (threshold exceeded)
+    //---------------------------------------------------
+    if (fortifyScanCount > pendingJobThreshold) {
+
+        if (notified == "false") {
+            println "INFO: Threshold exceeded. FIRST FAILURE. Sending notification."
+            notifyTeamsChannel()
+            writeFile(file: counterFile, text: "notified-true\n")
+        } else {
+            println "INFO: Already notified previously. Skipping."
+        }
+
+        return
+    }
+
+    //---------------------------------------------------
+    // SUCCESS SCENARIO (normal)
+    //---------------------------------------------------
+    println "INFO: Count normal. Resetting notification state."
+    writeFile(file: counterFile, text: "notified-false\n")
+}
+
+=====================================================
 getbuildtriggetd details
 
 import hudson.tasks.Mailer
