@@ -1,5 +1,66 @@
+claude code with only chnage to the boolena to string parameter
 
+def call(def countValReset) {
+    def envProperty = loadEnvironmentProperties()
+    def counterFile = envProperty.fortify_global_counter_file
+    def fortifyApiToken = envProperty.fortify_api_credential_id
+    def fortifyApiURL = envProperty.fortify_api_url
+    def pendingJobThreshold = envProperty.fortify_count_threshold as Integer
+    def notificationEnabled = (envProperty.fortify_notification_enabled ?: "true").toBoolean()
+    
+    if (!notificationEnabled) {
+        println "INFO: Fortify Team Notification is DISABLED. Skipping notification processing."
+        return
+    }
+    
+    // FIXED: Work with string directly, no string-to-boolean conversion
+    def notified = "false"
+    
+    if (fileExists(counterFile)) {
+        def line = readFile(counterFile).trim()
+        if (line.startsWith("notified-")) {
+            notified = line.split("-")[1]  // Keep as string: "true" or "false"
+            println "INFO: Previous notification state = ${notified}"
+        } else {
+            println "WARN: Counter file invalid. Resetting to notified-false"
+            writeFile(file: counterFile, text: "notified-false\n")
+        }
+    } else {
+        println "WARN: No global counter file found"
+        writeFile(file: counterFile, text: "notified-false\n")
+    }
+    
+    def fortifyScanCount = getFortifyPendingJobsCount(fortifyApiToken, fortifyApiURL)
+    println "INFO: Fortify pending job count ${fortifyScanCount}"
+    
+    if (fortifyScanCount > pendingJobThreshold) {
+        // FIXED: Compare strings directly instead of using boolean
+        if (notified == "false") {
+            // FAILURE (count > threshold)
+            println "INFO: Threshold exceeded. FIRST FAILURE. Sending Teams Notification"
+            notifyTeamsChannel()
+            writeFile(file: counterFile, text: "notified-true\n")
+        } else {
+            println "INFO: Threshold exceeded but already notified earlier. Skipping notify"
+        }
+    } else {
+        // CASE 2: SUCCESS (count <= threshold)
+        // Reset notification flag
+        println "INFO: Pending count normal. Resetting notification state"
+        writeFile(file: counterFile, text: "notified-false\n")
+    }
+}
 
+def getFortifyPendingJobsCount(def fortifyApiToken, def fortifyApiURL) {
+    withCredentials([string(credentialsId: fortifyApiToken, variable: 'credentials')]) {
+        def scanResponse = sh(script: "curl -ksH 'Authorization: FortifyToken ${credentials}' '${fortifyApiURL}/cloudjobs?fields=jobState&q=jobState:PENDING'", returnStdout: true).trim()
+        def jsonResponse = readJSON text: scanResponse
+        def jobsCount = jsonResponse.count ?: 0
+        println "INFO: Pending jobs count in Fortify: ${jobsCount}"
+        return jobsCount
+    }
+}
+=================================================================================
 updateglobalcoubnterfile with mockcount
 /**
  * Updates global counter file for Fortify notification tracking
