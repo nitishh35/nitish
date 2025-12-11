@@ -1,4 +1,202 @@
-notifyteamchannel
+
+updateglobalcounterfile
+
+/**
+ * Updates global counter file for Fortify notification tracking
+ * Uses JSON format for robust state management
+ * 
+ * @param countValReset - "reset" to reset notification state after successful scan
+ */
+def call(String countValReset = "") {
+    def envProperty = loadEnvironmentProperties()
+    
+    def counterFile = envProperty.fortify_global_counter_file
+    def fortifyApiToken = envProperty.fortify_api_credential_id
+    def fortifyApiURL = envProperty.fortify_api_url
+    def pendingJobThreshold = envProperty.fortify_count_threshold as Integer
+    def notificationEnabled = (envProperty.fortify_notification_enabled ?: "true").toBoolean()
+    
+    // Early exit if notifications disabled
+    if (!notificationEnabled) {
+        println "INFO: Fortify Team Notification is DISABLED. Skipping notification processing."
+        return
+    }
+    
+    // Read current state from file (using JSON format)
+    def currentState = readCounterState(counterFile)
+    
+    // Get current pending jobs count from Fortify
+    def fortifyScanCount = getFortifyPendingJobsCount(fortifyApiToken, fortifyApiURL)
+    println "INFO: Fortify pending job count: ${fortifyScanCount}, Threshold: ${pendingJobThreshold}"
+    
+    // Determine if we should send notification
+    if (fortifyScanCount > pendingJobThreshold) {
+        // CASE 1: Threshold exceeded
+        if (currentState.notified == "false") {
+            // First time exceeding threshold - send notification
+            println "INFO: Threshold exceeded (${fortifyScanCount} > ${pendingJobThreshold}). FIRST FAILURE - Sending Teams Notification"
+            notifyTeamsChannel()
+            writeCounterState(counterFile, "true", fortifyScanCount)
+        } else {
+            // Already notified - skip
+            println "INFO: Threshold exceeded but already notified earlier. Skipping notification."
+        }
+    } else {
+        // CASE 2: Within threshold - reset notification state
+        if (currentState.notified == "true") {
+            println "INFO: Pending count back to normal (${fortifyScanCount} <= ${pendingJobThreshold}). Resetting notification state."
+        }
+        writeCounterState(counterFile, "false", fortifyScanCount)
+    }
+    
+    // Handle explicit reset request (from successful Fortify scan)
+    if (countValReset?.equalsIgnoreCase("reset")) {
+        println "INFO: Explicit reset requested. Resetting notification state."
+        writeCounterState(counterFile, "false", fortifyScanCount)
+    }
+}
+
+/**
+ * Reads the current state from counter file
+ * Returns a map with 'notified' status as string
+ */
+def readCounterState(String counterFile) {
+    def defaultState = [notified: "false", lastCount: 0, lastUpdate: ""]
+    
+    if (!fileExists(counterFile)) {
+        println "INFO: No global counter file found. Creating with default state."
+        writeCounterState(counterFile, "false", 0)
+        return defaultState
+    }
+    
+    try {
+        def fileContent = readFile(counterFile).trim()
+        
+        // Parse JSON format
+        if (fileContent.startsWith("{")) {
+            def jsonResponse = readJSON text: fileContent
+            return [
+                notified: jsonResponse.notified ?: "false",
+                lastCount: jsonResponse.lastCount ?: 0,
+                lastUpdate: jsonResponse.lastUpdate ?: ""
+            ]
+        } else {
+            // Legacy format or invalid - reset to default
+            println "WARN: Counter file in invalid format. Resetting to default state."
+            writeCounterState(counterFile, "false", 0)
+            return defaultState
+        }
+    } catch (Exception e) {
+        println "ERROR: Failed to read counter file: ${e.message}. Using default state."
+        writeCounterState(counterFile, "false", 0)
+        return defaultState
+    }
+}
+
+/**
+ * Writes the counter state to file in JSON format
+ * Uses string values to avoid boolean parsing issues
+ */
+def writeCounterState(String counterFile, String notifiedStatus, Integer jobCount) {
+    def timestamp = new Date().format("yyyy-MM-dd HH:mm:ss")
+    
+    def stateJson = """
+{
+  "notified": "${notifiedStatus}",
+  "lastCount": ${jobCount},
+  "lastUpdate": "${timestamp}"
+}
+""".trim()
+    
+    try {
+        writeFile(file: counterFile, text: stateJson)
+        println "INFO: Global counter file updated successfully. Status: notified=${notifiedStatus}"
+    } catch (Exception e) {
+        println "ERROR: Failed to write counter file: ${e.message}"
+        throw e
+    }
+}
+
+/**
+ * Gets the count of pending jobs from Fortify API
+ */
+def getFortifyPendingJobsCount(String fortifyApiToken, String fortifyApiURL) {
+    withCredentials([string(credentialsId: fortifyApiToken, variable: 'credentials')]) {
+        try {
+            def scanResponse = sh(
+                script: "curl -ksH 'Authorization: FortifyToken ${credentials}' '${fortifyApiURL}/cloudjobs?fields=jobState&q=jobState:PENDING'",
+                returnStdout: true
+            ).trim()
+            
+            def jsonResponse = readJSON text: scanResponse
+            def jobsCount = jsonResponse.count ?: 0
+            
+            println "INFO: Pending jobs count in Fortify: ${jobsCount}"
+            return jobsCount
+            
+        } catch (Exception e) {
+            println "ERROR: Failed to get Fortify pending jobs count: ${e.message}"
+            return 0
+        }
+    }
+}
+==========================================
+
+    logstage file
+
+/**
+ * Wrapper for pipeline stages with logging and post-stage actions
+ * 
+ * @param stageName - Name of the stage being executed
+ * @param body - Closure containing the stage logic
+ */
+def call(String stageName, Closure body) {
+    def greenBold = '\u001B[1;32m'
+    def resetColor = '\u001B[0m'
+    
+    try {
+        println "${greenBold}***** STAGE '${stageName}' STARTED *****${resetColor}"
+        
+        // Execute the stage body
+        body()
+        
+        println "${greenBold}***** STAGE '${stageName}' COMPLETED SUCCESSFULLY *****${resetColor}"
+        
+        // Post-stage actions based on stage name
+        handlePostStageActions(stageName)
+        
+    } catch (Exception err) {
+        // Store failed stage name for error reporting
+        env.failedStage = stageName
+        println "ERROR: Stage '${stageName}' failed with error: ${err.message}"
+        throw err
+    }
+}
+
+/**
+ * Handles post-stage actions for specific stages
+ */
+def handlePostStageActions(String stageName) {
+    // Reset notification counter after successful Fortify scan
+    if (stageName.equalsIgnoreCase("scan-fortify")) {
+        println "INFO: Fortify scan completed successfully. Resetting global notification counter."
+        try {
+            updateGlobalCounterFile("reset")
+        } catch (Exception e) {
+            // Don't fail the stage if counter update fails
+            println "WARN: Failed to reset global counter: ${e.message}"
+        }
+    }
+    
+    // Add other post-stage actions here as needed
+    // Example:
+    // if (stageName.equalsIgnoreCase("deploy-production")) {
+    //     notifyDeploymentSuccess()
+    // }
+}
+===========================================================================
+    ==============================
+    notifyteamchannel
 
 def call() {
     def envProperty = loadEnvironmentProperties()
