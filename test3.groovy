@@ -1,65 +1,116 @@
 claude code with only chnage to the boolena to string parameter
 
+/**
+ * MAIN METHOD
+ * Supports:
+ *   updateGlobalCounterFile("runCheck")
+ */
 def call(def countValReset) {
+
     def envProperty = loadEnvironmentProperties()
     def counterFile = envProperty.fortify_global_counter_file
-    def fortifyApiToken = envProperty.fortify_api_credential_id
-    def fortifyApiURL = envProperty.fortify_api_url
     def pendingJobThreshold = envProperty.fortify_count_threshold as Integer
     def notificationEnabled = (envProperty.fortify_notification_enabled ?: "true").toBoolean()
-    
+
     if (!notificationEnabled) {
-        println "INFO: Fortify Team Notification is DISABLED. Skipping notification processing."
+        println "INFO: Fortify Team Notification is DISABLED. Skipping processing."
         return
     }
-    
-    // FIXED: Work with string directly, no string-to-boolean conversion
+
+    // Work with strings: "true" / "false"
     def notified = "false"
-    
+
     if (fileExists(counterFile)) {
         def line = readFile(counterFile).trim()
         if (line.startsWith("notified-")) {
-            notified = line.split("-")[1]  // Keep as string: "true" or "false"
+            notified = line.split("-")[1]  // do NOT convert to boolean
             println "INFO: Previous notification state = ${notified}"
         } else {
-            println "WARN: Counter file invalid. Resetting to notified-false"
+            println "WARN: Invalid counter file. Resetting."
             writeFile(file: counterFile, text: "notified-false\n")
         }
     } else {
-        println "WARN: No global counter file found"
+        println "WARN: Counter file missing. Creating new one."
         writeFile(file: counterFile, text: "notified-false\n")
     }
-    
-    def fortifyScanCount = getFortifyPendingJobsCount(fortifyApiToken, fortifyApiURL)
-    println "INFO: Fortify pending job count ${fortifyScanCount}"
-    
+
+    // -------------------------------
+    // GET JOB COUNT (MOCK ONLY)
+    // -------------------------------
+    def fortifyScanCount = getMockScanCount()
+    println "INFO: MOCK Fortify Scan Count = ${fortifyScanCount}"
+
+    // -------------------------------
+    // FAILURE CASE (count > threshold)
+    // -------------------------------
     if (fortifyScanCount > pendingJobThreshold) {
-        // FIXED: Compare strings directly instead of using boolean
+
         if (notified == "false") {
-            // FAILURE (count > threshold)
-            println "INFO: Threshold exceeded. FIRST FAILURE. Sending Teams Notification"
+            println "INFO: Threshold exceeded. FIRST FAILURE. Sending notification."
             notifyTeamsChannel()
             writeFile(file: counterFile, text: "notified-true\n")
-        } else {
-            println "INFO: Threshold exceeded but already notified earlier. Skipping notify"
+        } 
+        else {
+            println "INFO: Threshold exceeded BUT already notified. Skipping."
         }
-    } else {
-        // CASE 2: SUCCESS (count <= threshold)
-        // Reset notification flag
-        println "INFO: Pending count normal. Resetting notification state"
-        writeFile(file: counterFile, text: "notified-false\n")
+
+        return
     }
+
+    // -------------------------------
+    // SUCCESS CASE (count <= threshold)
+    // -------------------------------
+    println "INFO: Count normal. Resetting notification state."
+    writeFile(file: counterFile, text: "notified-false\n")
 }
 
-def getFortifyPendingJobsCount(def fortifyApiToken, def fortifyApiURL) {
-    withCredentials([string(credentialsId: fortifyApiToken, variable: 'credentials')]) {
-        def scanResponse = sh(script: "curl -ksH 'Authorization: FortifyToken ${credentials}' '${fortifyApiURL}/cloudjobs?fields=jobState&q=jobState:PENDING'", returnStdout: true).trim()
-        def jsonResponse = readJSON text: scanResponse
-        def jobsCount = jsonResponse.count ?: 0
-        println "INFO: Pending jobs count in Fortify: ${jobsCount}"
-        return jobsCount
+
+/**
+ * BACKWARD-COMPATIBILITY WRAPPER
+ * Allows:
+ *   updateGlobalCounterFile("runCheck", 15)
+ */
+def call(def action, def mockCount) {
+
+    println "INFO: MOCK MODE INVOKED → action=${action}, mockCount=${mockCount}"
+
+    // save mock value so main logic can use it
+    this.mockValue = mockCount
+
+    // normalize action
+    if (action.equalsIgnoreCase("runCheck")) {
+        return call("mockRun")
     }
+
+    if (action.equalsIgnoreCase("resetWithout Notification") ||
+        action.equalsIgnoreCase("resetWithoutNotification") ||
+        action.equalsIgnoreCase("reset")) {
+
+        return call("reset")
+    }
+
+    println "WARN: Unknown action '${action}'. Passing to main call()"
+    return call(action)
 }
+
+
+/**
+ * MOCK Fortify count provider
+ * Removes API call completely
+ */
+def getMockScanCount() {
+    if (this.mockValue != null) {
+        println "INFO: Using MOCK value = ${this.mockValue}"
+        def tmp = this.mockValue
+        this.mockValue = null  // prevent reuse
+        return tmp
+    }
+
+    // If no mock provided, default to 0
+    println "INFO: No mock value provided. Defaulting count = 0"
+    return 0
+}
+
 =================================================================================
 updateglobalcoubnterfile with mockcount
 /**
