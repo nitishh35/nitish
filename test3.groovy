@@ -231,146 +231,67 @@ def getFortifyPendingJobsCount(String fortifyApiToken, String fortifyApiURL) {
 }
 
 ======================================================================================================
-updateglobalcounterfile
-
-/**
- * Updates global counter file for Fortify notification tracking
- * Uses JSON format for robust state management
- * 
- * @param countValReset - "reset" to reset notification state after successful scan
- */
-def call(String countValReset = "") {
+updateglobalcounterfile - with sting to sting no boolen
+def call(def countValReset) {
     def envProperty = loadEnvironmentProperties()
-    
     def counterFile = envProperty.fortify_global_counter_file
     def fortifyApiToken = envProperty.fortify_api_credential_id
     def fortifyApiURL = envProperty.fortify_api_url
     def pendingJobThreshold = envProperty.fortify_count_threshold as Integer
     def notificationEnabled = (envProperty.fortify_notification_enabled ?: "true").toBoolean()
     
-    // Early exit if notifications disabled
     if (!notificationEnabled) {
         println "INFO: Fortify Team Notification is DISABLED. Skipping notification processing."
         return
     }
     
-    // Read current state from file (using JSON format)
-    def currentState = readCounterState(counterFile)
+    // FIXED: Work with string directly, no string-to-boolean conversion
+    def notified = "false"
     
-    // Get current pending jobs count from Fortify
-    def fortifyScanCount = getFortifyPendingJobsCount(fortifyApiToken, fortifyApiURL)
-    println "INFO: Fortify pending job count: ${fortifyScanCount}, Threshold: ${pendingJobThreshold}"
-    
-    // Determine if we should send notification
-    if (fortifyScanCount > pendingJobThreshold) {
-        // CASE 1: Threshold exceeded
-        if (currentState.notified == "false") {
-            // First time exceeding threshold - send notification
-            println "INFO: Threshold exceeded (${fortifyScanCount} > ${pendingJobThreshold}). FIRST FAILURE - Sending Teams Notification"
-            notifyTeamsChannel()
-            writeCounterState(counterFile, "true", fortifyScanCount)
+    if (fileExists(counterFile)) {
+        def line = readFile(counterFile).trim()
+        if (line.startsWith("notified-")) {
+            notified = line.split("-")[1]  // Keep as string: "true" or "false"
+            println "INFO: Previous notification state = ${notified}"
         } else {
-            // Already notified - skip
-            println "INFO: Threshold exceeded but already notified earlier. Skipping notification."
+            println "WARN: Counter file invalid. Resetting to notified-false"
+            writeFile(file: counterFile, text: "notified-false\n")
         }
     } else {
-        // CASE 2: Within threshold - reset notification state
-        if (currentState.notified == "true") {
-            println "INFO: Pending count back to normal (${fortifyScanCount} <= ${pendingJobThreshold}). Resetting notification state."
-        }
-        writeCounterState(counterFile, "false", fortifyScanCount)
+        println "WARN: No global counter file found"
+        writeFile(file: counterFile, text: "notified-false\n")
     }
     
-    // Handle explicit reset request (from successful Fortify scan)
-    if (countValReset?.equalsIgnoreCase("reset")) {
-        println "INFO: Explicit reset requested. Resetting notification state."
-        writeCounterState(counterFile, "false", fortifyScanCount)
-    }
-}
-
-/**
- * Reads the current state from counter file
- * Returns a map with 'notified' status as string
- */
-def readCounterState(String counterFile) {
-    def defaultState = [notified: "false", lastCount: 0, lastUpdate: ""]
+    def fortifyScanCount = getFortifyPendingJobsCount(fortifyApiToken, fortifyApiURL)
+    println "INFO: Fortify pending job count ${fortifyScanCount}"
     
-    if (!fileExists(counterFile)) {
-        println "INFO: No global counter file found. Creating with default state."
-        writeCounterState(counterFile, "false", 0)
-        return defaultState
-    }
-    
-    try {
-        def fileContent = readFile(counterFile).trim()
-        
-        // Parse JSON format
-        if (fileContent.startsWith("{")) {
-            def jsonResponse = readJSON text: fileContent
-            return [
-                notified: jsonResponse.notified ?: "false",
-                lastCount: jsonResponse.lastCount ?: 0,
-                lastUpdate: jsonResponse.lastUpdate ?: ""
-            ]
+    if (fortifyScanCount > pendingJobThreshold) {
+        // FIXED: Compare strings directly instead of using boolean
+        if (notified == "false") {
+            // FAILURE (count > threshold)
+            println "INFO: Threshold exceeded. FIRST FAILURE. Sending Teams Notification"
+            notifyTeamsChannel()
+            writeFile(file: counterFile, text: "notified-true\n")
         } else {
-            // Legacy format or invalid - reset to default
-            println "WARN: Counter file in invalid format. Resetting to default state."
-            writeCounterState(counterFile, "false", 0)
-            return defaultState
+            println "INFO: Threshold exceeded but already notified earlier. Skipping notify"
         }
-    } catch (Exception e) {
-        println "ERROR: Failed to read counter file: ${e.message}. Using default state."
-        writeCounterState(counterFile, "false", 0)
-        return defaultState
+    } else {
+        // CASE 2: SUCCESS (count <= threshold)
+        // Reset notification flag
+        println "INFO: Pending count normal. Resetting notification state"
+        writeFile(file: counterFile, text: "notified-false\n")
     }
 }
 
-/**
- * Writes the counter state to file in JSON format
- * Uses string values to avoid boolean parsing issues
- */
-def writeCounterState(String counterFile, String notifiedStatus, Integer jobCount) {
-    def timestamp = new Date().format("yyyy-MM-dd HH:mm:ss")
-    
-    def stateJson = """
-{
-  "notified": "${notifiedStatus}",
-  "lastCount": ${jobCount},
-  "lastUpdate": "${timestamp}"
-}
-""".trim()
-    
-    try {
-        writeFile(file: counterFile, text: stateJson)
-        println "INFO: Global counter file updated successfully. Status: notified=${notifiedStatus}"
-    } catch (Exception e) {
-        println "ERROR: Failed to write counter file: ${e.message}"
-        throw e
-    }
-}
-
-/**
- * Gets the count of pending jobs from Fortify API
- */
-def getFortifyPendingJobsCount(String fortifyApiToken, String fortifyApiURL) {
+def getFortifyPendingJobsCount(def fortifyApiToken, def fortifyApiURL) {
     withCredentials([string(credentialsId: fortifyApiToken, variable: 'credentials')]) {
-        try {
-            def scanResponse = sh(
-                script: "curl -ksH 'Authorization: FortifyToken ${credentials}' '${fortifyApiURL}/cloudjobs?fields=jobState&q=jobState:PENDING'",
-                returnStdout: true
-            ).trim()
-            
-            def jsonResponse = readJSON text: scanResponse
-            def jobsCount = jsonResponse.count ?: 0
-            
-            println "INFO: Pending jobs count in Fortify: ${jobsCount}"
-            return jobsCount
-            
-        } catch (Exception e) {
-            println "ERROR: Failed to get Fortify pending jobs count: ${e.message}"
-            return 0
-        }
+        def scanResponse = sh(script: "curl -ksH 'Authorization: FortifyToken ${credentials}' '${fortifyApiURL}/cloudjobs?fields=jobState&q=jobState:PENDING'", returnStdout: true).trim()
+        def jsonResponse = readJSON text: scanResponse
+        def jobsCount = jsonResponse.count ?: 0
+        println "INFO: Pending jobs count in Fortify: ${jobsCount}"
+        return jobsCount
     }
+}
 }
 ==========================================
 
