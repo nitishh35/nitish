@@ -1,4 +1,36 @@
-claude code with only chnage to the boolena to string parameter
+
+getbuildtriggetd details
+
+import hudson.tasks.Mailer
+import hudson.model.User
+import hudson.model.Cause
+
+def call() {
+    def buildCause = currentBuild.rawBuild.getCause(Cause.UserIdCause)
+    
+    if (buildCause == null) {
+        def upstreamCause = currentBuild.rawBuild.getCause(Cause.UpstreamCause)
+        // Removed: if (upstreamCause != null) check
+        def upstreamBuild = upstreamCause.getUpstreamRun()
+        def upstreamUserCause = upstreamBuild.getCause(Cause.UserIdCause)
+        // Removed: if (upstreamUserCause != null) check
+        buildCause = upstreamUserCause
+    }
+    
+    def userId = buildCause.getUserId()
+    def userData = User.get(userId)
+    def mailProp = userData.getProperty(Mailer.UserProperty.class)
+    def userEmail = mailProp?.getAddress() ?: null
+    def userName = userData.getDisplayName()
+    
+    return [
+        userName: userName,
+        userEmail: userEmail
+    ]
+}
+==========================
+    
+    claude code with only chnage to the boolena to string parameter
 
 /**
  * MAIN METHOD
