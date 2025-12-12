@@ -1,3 +1,77 @@
+notifyteamchnnale
+
+def call() {
+    def envProperty = loadEnvironmentProperties()
+    def devopsWorkFlowUrl = envProperty.devops_workflow_url
+    def fortifyWorkFlowUrl = envProperty.fortify_workflow_url
+    def emailAddressList = envProperty.to_email_address_list
+    def fortifyChannelEmails = envProperty.fortify_channel_emails_json
+    def pipelineUrl = env.BUILD_URL ?: ""
+    
+    // Create JSON for DevOps channel using original function
+    def baseDevOpsJson = createEmailJson(emailAddressList, pipelineUrl)
+    println "INFO: DevOps JSON to send: ${baseDevOpsJson}"
+    def escapedDevOpsJson = baseDevOpsJson.replace("'", "'\\''")
+    
+    def devopsChannelResponse = sh(
+        script: "curl -s -w '\\n%{http_code}' -H 'Content-Type: application/json' -H 'Accept: application/json' -X POST '${devopsWorkFlowUrl}' -d '${escapedDevOpsJson}'",
+        returnStdout: true
+    ).trim()
+    
+    def devopsLines = devopsChannelResponse.split('\n')
+    def devopsResponseBody = devopsLines.size() > 1 ? devopsLines[0..-2].join('\n') : ''
+    def devopsResponseCode = devopsLines[-1]
+    
+    println "INFO: DevOps Teams channel response code: ${devopsResponseCode}"
+    println "INFO: DevOps Teams channel response body: ${devopsResponseBody}"
+    
+    // Create JSON for Fortify channel using original function
+    def enrichedFortifyJson = createFortifyJson(fortifyChannelEmails, pipelineUrl)
+    println "INFO: Fortify JSON to send: ${enrichedFortifyJson}"
+    def escapedFortifyJson = enrichedFortifyJson.replace("'", "'\\''")
+    
+    def fortifyChannelResponse = sh(
+        script: "curl -s -w '\\n%{http_code}' -H 'Content-Type: application/json' -H 'Accept: application/json' -X POST '${fortifyWorkFlowUrl}' -d '${escapedFortifyJson}'",
+        returnStdout: true
+    ).trim()
+    
+    def fortifyLines = fortifyChannelResponse.split('\n')
+    def fortifyResponseBody = fortifyLines.size() > 1 ? fortifyLines[0..-2].join('\n') : ''
+    def fortifyResponseCode = fortifyLines[-1]
+    
+    println "INFO: Fortify support channel response code: ${fortifyResponseCode}"
+    println "INFO: Fortify support channel response body: ${fortifyResponseBody}"
+}
+
+def createEmailJson(def emailAddressList, def pipelineUrl) {
+    // For devops channel - handles comma-separated email list
+    def emails = emailAddressList.split(',').collect { it.trim() }
+    def emailMap = [:]
+    
+    // Using standard for loop with counter
+    int counter = 1
+    for (String email : emails) {
+        emailMap["email${counter}"] = email
+        counter++
+    }
+    
+    emailMap["pipelineUrl"] = pipelineUrl
+    
+    def jsonString = groovy.json.JsonOutput.toJson(emailMap)
+    println "INFO: Email JSON created: ${jsonString}"
+    return jsonString
+}
+
+def createFortifyJson(def fortifyChannelEmails, def pipelineUrl) {
+    // For fortify channel - handles JSON input
+    def fortifyMap = new groovy.json.JsonSlurper().parseText(fortifyChannelEmails)
+    fortifyMap["pipelineUrl"] = pipelineUrl
+    
+    def jsonString = groovy.json.JsonOutput.toJson(fortifyMap)
+    println "INFO: Fortify JSON created: ${jsonString}"
+    return jsonString
+}
+===================================================
 /**
  * MAIN ENTRY (old behavior preserved)
  * Supports:
