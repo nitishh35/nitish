@@ -1,140 +1,70 @@
-notification
+updateglobalcounetrfile
 
-
-def call() {
-    def envProperty = loadEnvironmentProperties()
-    def devopsWorkFlowUrl = envProperty.devops_workflow_url
-    def fortifyWorkFlowUrl = envProperty.fortify_workflow_url
-    def emailAddressList = envProperty.to_email_address_list
-    def fortifyChannelEmails = envProperty.fortify_channel_emails
-    
-    sendNotification(devopsWorkFlowUrl, createChannelJson(emailAddressList), "DevOps")
-    sendNotification(fortifyWorkFlowUrl, createChannelJson(fortifyChannelEmails), "Fortify")
-}
-
-def sendNotification(def workflowUrl, def jsonPayload, def channelName) {
-    println "INFO: ${channelName} json to send: ${jsonPayload}"
-    def escapedJson = jsonPayload.replace("'", "'\\''")
-    def response = sh(
-        script: "curl -s -w '%{http_code}' -H 'Content-Type: application/json' -H 'Accept: application/json' -X POST '${workflowUrl}' -d '${escapedJson}'",
-        returnStdout: true
-    ).trim()
-    println "INFO: ${channelName} channel response: ${response}"
-    
-    if (!response.startsWith("2")) {
-        println "WARN: ${channelName} notification failed with response: ${response}"
-    }
-}
-
-def createChannelJson(def emailInput) {
-    def pipelineUrl = env.BUILD_URL ?: ""
-    def emailMap = [:]
-    def emails = emailInput ? emailInput.split(',') : []
-    int counter = 1
-    
-    for (int i = 0; i < emails.size(); i++) {
-        emailMap["email${counter}"] = emails[i].trim()  // Changed from mailMap to emailMap
-        counter++
-    }
-    
-    emailMap["pipelineUrl"] = pipelineUrl
-    def jsonString = groovy.json.JsonOutput.toJson(emailMap)
-    println "INFO: Channel json created: ${jsonString}"
-    return jsonString
-}
-===================================================
-/**
- * MAIN ENTRY (old behavior preserved)
- * Supports:
- *   updateGlobalCounterFile("runCheck", 7)
- *   updateGlobalCounterFile("resetWithoutNotification")
- */
-def call(def action, Integer mockCount = null) {
-
-    println "INFO: MOCK MODE INVOKED → action=${action}, mockCount=${mockCount}"
-
-    // Normalize action
-    if (action.equalsIgnoreCase("runCheck")) {
-        return runMainLogic(mockCount)
-    }
-
-    if (action.equalsIgnoreCase("resetWithoutNotification") ||
-        action.equalsIgnoreCase("reset")) {
-        return runMainLogic(0)       // reset sets count=0
-    }
-
-    // Default fallback
-    println "WARN: Unknown action '${action}'. Running main logic."
-    return runMainLogic(mockCount)
-}
-
-
-
-/**
- * MAIN BUSINESS LOGIC
- */
-def runMainLogic(Integer mockCount) {
-
+def call(def countValReset) {
     def envProperty = loadEnvironmentProperties()
     def counterFile = envProperty.fortify_global_counter_file
+    def fortifyApiToken = envProperty.fortify_api_credential_id
+    def fortifyApiURL = envProperty.fortify_api_url
     def pendingJobThreshold = envProperty.fortify_count_threshold as Integer
-    def notificationEnabled = (envProperty.fortify_notification_enabled ?: "true").toBoolean()
-
+    def notificationEnabled = (envProperty.fortify_notification_enabled == null) ? 
+        true : envProperty.fortify_notification_enabled.toLowerCase() == "true"
+    
     if (!notificationEnabled) {
-        println "INFO: Fortify Team Notification is DISABLED. Skipping processing."
+        println "INFO: Fortify Team Notification is DISABLED. Skipping notification processing."
         return
     }
-
-    //---------------------------------------------------
-    // Load existing notification state (notified-true/false)
-    //---------------------------------------------------
-    def notified = "false"
-
+    
+    def notified = false
     if (fileExists(counterFile)) {
-        def line = readFile(counterFile).trim()
-
-        if (line.startsWith("notified-")) {
-            notified = line.split("-")[1]
-            println "INFO: Previous notification state = ${notified}"
+        def content = readFile(counterFile).trim()
+        if (content.equalsIgnoreCase("true")) {
+            notified = true
+        } else if (content.equalsIgnoreCase("false")) {
+            notified = false
         } else {
-            println "WARN: Invalid counter file. Resetting to notified-false."
-            writeFile(file: counterFile, text: "notified-false\n")
+            println "WARN: Counter file invalid. Resetting to false"
+            writeFile(file: counterFile, text: "false\n")
         }
-
+        println "INFO: Previous notification state: ${notified}"
     } else {
-        println "WARN: Counter file missing. Creating new one."
-        writeFile(file: counterFile, text: "notified-false\n")
+        println "WARN: No global counter file found. Creating with initial state: false"
+        writeFile(file: counterFile, text: "false\n")
     }
-
-    //---------------------------------------------------
-    // TEST MODE → Use the mock value directly
-    //---------------------------------------------------
-    def fortifyScanCount = (mockCount != null ? mockCount : 0)
-
-    println "INFO: Fortify Scan Count = ${fortifyScanCount}"
-
-    //---------------------------------------------------
-    // FAILURE SCENARIO (threshold exceeded)
-    //---------------------------------------------------
+    
+    def fortifyScanCount = getFortifyPendingJobsCount(fortifyApiToken, fortifyApiURL)
+    println "INFO: Fortify pending job count: ${fortifyScanCount}"
+    
     if (fortifyScanCount > pendingJobThreshold) {
-
-        if (notified == "false") {
+        if (!notified) {
             println "INFO: Threshold exceeded. FIRST FAILURE. Sending notification."
             notifyTeamsChannel()
-            writeFile(file: counterFile, text: "notified-true\n")
+            writeFile(file: counterFile, text: "true\n")
         } else {
-            println "INFO: Already notified previously. Skipping."
+            println "INFO: Threshold exceeded but already notified earlier. Skipping notification."
         }
-
         return
     }
-
-    //---------------------------------------------------
-    // SUCCESS SCENARIO (normal)
-    //---------------------------------------------------
-    println "INFO: Count normal. Resetting notification state."
-    writeFile(file: counterFile, text: "notified-false\n")
+    
+    println "INFO: Pending count normal, resetting notification state"
+    writeFile(file: counterFile, text: "false\n")
 }
+
+def getFortifyPendingJobsCount(def fortifyApiToken, def fortifyApiURL) {
+    withCredentials([string(credentialsId: fortifyApiToken, variable: 'credentials')]) {
+        def scanResponse = sh(
+            script: "curl -ksH 'Authorization: FortifyToken ${credentials}' '${fortifyApiURL}/cloudjobs?fields=jobState&q=jobState:PENDING'",
+            returnStdout: true
+        ).trim()
+        def jsonResponse = readJSON(text: scanResponse)
+        def jobsCount = jsonResponse.count ?: 0
+        println "INFO: Pending jobs count in Fortify: ${jobsCount}"
+        return jobsCount
+    }
+}
+======================================
+    =======================================
+    ============================
+    ================
 
 =====================================================
 getbuildtriggetd details
