@@ -1,118 +1,45 @@
-updateglobalcounetrfile
-def call(def countValReset) {
-    def envProperty = loadEnvironmentProperties()
-    def counterFile = envProperty.fortify_global_counter_file
-    def fortifyApiToken = envProperty.fortify_api_credential_id
-    def fortifyApiURL = envProperty.fortify_api_url
-    def pendingJobThreshold = envProperty.fortify_count_threshold as Integer
-    def notificationEnabled = (envProperty.fortify_notification_enabled == null) ? 
-        true : envProperty.fortify_notification_enabled.toLowerCase() == "true"
-    
-    if (!notificationEnabled) {
-        println "INFO: Fortify Team Notification is DISABLED. Skipping notification processing."
-        return
-    }
-    
-    def notified = false
-    if (fileExists(counterFile)) {
-        def line = readFile(counterFile).trim()
-        if (line.startsWith("notified-")) {
-            def val = line.split("-")[1]
-            notified = (val.toLowerCase() == "true")
-            println "INFO: Previous notification state: ${notified}"
-        } else {
-            println "WARN: Counter file invalid. Resetting."
-            writeFile(file: counterFile, text: "notified-false\n")
-        }
-    } else {
-        println "WARN: Counter file missing. Creating new one."
-        writeFile(file: counterFile, text: "notified-false\n")
-    }
-    
-    // Get real Fortify pending job count
-    def fortifyScanCount = getFortifyPendingJobsCount(fortifyApiToken, fortifyApiURL)
-    println "INFO: Fortify pending job count: ${fortifyScanCount}"
-    
-    if (fortifyScanCount > pendingJobThreshold) {
-        if (!notified) {
-            println "INFO: Threshold exceeded. FIRST FAILURE. Sending notification."
-            notifyTeamsChannel()
-            writeFile(file: counterFile, text: "notified-true\n")
-        } else {
-            println "INFO: Already notified earlier. Skipping."
-        }
-        return
-    }
-    
-    println "INFO: Fortify job count normal. Resetting state."
-    writeFile(file: counterFile, text: "notified-false\n")
-}
+notification
 
-def getFortifyPendingJobsCount(def fortifyApiToken, def fortifyApiURL) {
-    withCredentials([string(credentialsId: fortifyApiToken, variable: 'credentials')]) {
-        def scanResponse = sh(
-            script: """curl -ks -H 'Authorization: FortifyToken ${credentials}' \
-'${fortifyApiURL}/cloudjobs?fields=jobState&q=jobState:PENDING'""",
-            returnStdout: true
-        ).trim()
-        
-        def jsonResponse = readJSON(text: scanResponse)
-        def jobsCount = jsonResponse.count ?: 0
-        println "INFO: Pending jobs count in Fortify: ${jobsCount}"
-        return jobsCount
-    }
-}
-===============================================================
-notifyteamchnnale
 
 def call() {
     def envProperty = loadEnvironmentProperties()
     def devopsWorkFlowUrl = envProperty.devops_workflow_url
     def fortifyWorkFlowUrl = envProperty.fortify_workflow_url
     def emailAddressList = envProperty.to_email_address_list
-    def fortifyChannelEmails = envProperty.fortify_channel_emails_json
-    def pipelineUrl = env.BUILD_URL ?: ""
+    def fortifyChannelEmails = envProperty.fortify_channel_emails
     
-    // Create JSON for DevOps channel
-    def baseDevOpsJson = createEmailJson(emailAddressList, pipelineUrl)
-    println "INFO: DevOps JSON to send: ${baseDevOpsJson}"
-    def escapedDevOpsJson = baseDevOpsJson.replace("'", "'\\''")
-    
-    def devopsChannelResponseCode = sh(
-        script: "curl -s -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' -H 'Accept: application/json' -X POST '${devopsWorkFlowUrl}' -d '${escapedDevOpsJson}'",
-        returnStdout: true
-    ).trim()
-    
-    println "INFO: DevOps Teams channel response code: ${devopsChannelResponseCode}"
-    
-    // Create JSON for Fortify channel
-    def enrichedFortifyJson = createEmailJson(fortifyChannelEmails, pipelineUrl)
-    println "INFO: Fortify JSON to send: ${enrichedFortifyJson}"
-    def escapedFortifyJson = enrichedFortifyJson.replace("'", "'\\''")
-    
-    def fortifyChannelResponseCode = sh(
-        script: "curl -s -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' -H 'Accept: application/json' -X POST '${fortifyWorkFlowUrl}' -d '${escapedFortifyJson}'",
-        returnStdout: true
-    ).trim()
-    
-    println "INFO: Fortify support channel response code: ${fortifyChannelResponseCode}"
+    sendNotification(devopsWorkFlowUrl, createChannelJson(emailAddressList), "DevOps")
+    sendNotification(fortifyWorkFlowUrl, createChannelJson(fortifyChannelEmails), "Fortify")
 }
 
-def createEmailJson(def emailAddressList, def pipelineUrl) {
-    def emails = emailAddressList.split(',')
-    def emailMap = [:]
+def sendNotification(def workflowUrl, def jsonPayload, def channelName) {
+    println "INFO: ${channelName} json to send: ${jsonPayload}"
+    def escapedJson = jsonPayload.replace("'", "'\\''")
+    def response = sh(
+        script: "curl -s -w '%{http_code}' -H 'Content-Type: application/json' -H 'Accept: application/json' -X POST '${workflowUrl}' -d '${escapedJson}'",
+        returnStdout: true
+    ).trim()
+    println "INFO: ${channelName} channel response: ${response}"
     
-    // Using standard for loop without arrow syntax
+    if (!response.startsWith("2")) {
+        println "WARN: ${channelName} notification failed with response: ${response}"
+    }
+}
+
+def createChannelJson(def emailInput) {
+    def pipelineUrl = env.BUILD_URL ?: ""
+    def emailMap = [:]
+    def emails = emailInput ? emailInput.split(',') : []
     int counter = 1
+    
     for (int i = 0; i < emails.size(); i++) {
-        emailMap["email${counter}"] = emails[i].trim()
+        emailMap["email${counter}"] = emails[i].trim()  // Changed from mailMap to emailMap
         counter++
     }
     
     emailMap["pipelineUrl"] = pipelineUrl
-    
     def jsonString = groovy.json.JsonOutput.toJson(emailMap)
-    println "INFO: Email JSON created: ${jsonString}"
+    println "INFO: Channel json created: ${jsonString}"
     return jsonString
 }
 ===================================================
