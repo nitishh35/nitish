@@ -3,6 +3,7 @@ def call() {
     try {
         def buildStatus = currentBuild.result
         def stageName = "NA"
+        def channelUrl
         
         if (currentBuild.result.equalsIgnoreCase("FAILURE")) {
             stageName = env.failedStage
@@ -30,11 +31,10 @@ def call() {
         }
         
         def buildDataJson = groovy.json.JsonOutput.toJson(buildData)
-        def channelUrl = getProductWorkflowChannelUrl()
+        channelUrl = getProductWorkflowChannelUrl()
         
         if (channelUrl) {
-            // Call the internal method correctly
-            sendToTeamsChannel(buildDataJson, channelUrl)
+            notifyTeam(buildDataJson, channelUrl)
         }
     } catch (Exception e) {
         println "ERROR: Failed to send Teams notification: ${e.message}"
@@ -79,8 +79,7 @@ def getProductWorkflowChannelUrl() {
     return null
 }
 
-// RENAMED METHOD - this was the problem!
-def sendToTeamsChannel(String buildDataJson, String channelUrl) {
+def notifyTeam(def buildDataJson, def channelUrl) {
     def escapedJson = buildDataJson.replace("'", "'\\''")
     def responseCode = sh(
         script: """curl -k -w '%{http_code}' -H 'Content-Type: application/json' -H 'Accept: application/json' -X POST '${channelUrl}' -d '${escapedJson}' -s""",
