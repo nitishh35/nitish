@@ -1,4 +1,96 @@
-updateglobalcounetrfile for testing in poc jenkins
+sendteamnotofication
+def call() {
+    try {
+        def buildStatus = currentBuild.result
+        def stageName = "NA"
+        
+        if (currentBuild.result.equalsIgnoreCase("FAILURE")) {
+            stageName = env.failedStage
+        }
+        
+        def userInfo = getBuildTriggeredUserDetails()
+        def buildTriggeredUserEmailId = userInfo.userEmail
+        def buildTriggeredUserName = userInfo.userName
+        
+        if (buildTriggeredUserName == 'SVC-APP-RLCT') {
+            println "INFO: Notification suppressed for service account user: ${buildTriggeredUserName}"
+            return
+        }
+        
+        def buildData = [:]
+        buildData["pipelineURL"] = env.BUILD_URL
+        buildData["triggerdBy"] = buildTriggeredUserName
+        buildData["triggerdByEmail"] = buildTriggeredUserEmailId
+        buildData["status"] = buildStatus
+        
+        if (buildStatus == "FAILURE") {
+            buildData["stage"] = stageName
+        } else if (buildStatus == "SUCCESS" || buildStatus == "ABORTED" || buildStatus == "UNSTABLE") {
+            buildData["stage"] = "NA"
+        }
+        
+        def buildDataJson = groovy.json.JsonOutput.toJson(buildData)
+        def channelUrl = getProductWorkflowChannelUrl()
+        
+        if (channelUrl) {
+            // Call the internal method correctly
+            sendToTeamsChannel(buildDataJson, channelUrl)
+        }
+    } catch (Exception e) {
+        println "ERROR: Failed to send Teams notification: ${e.message}"
+    }
+}
+
+def getProductWorkflowChannelUrl() {
+    def content = libraryResource('pipeline-global-config/workflow-urls.properties')
+    def props = readProperties text: content
+    def buildUrl = env.BUILD_URL ?: ""
+    def productName
+    def channelUrl
+    
+    def commonFrameworkMatcher = buildUrl =~ /\/job\/Common-Framework\/job\/([^\/]+)/
+    if (commonFrameworkMatcher.find()) {
+        println "INFO: Common-Framework folder detected"
+        productName = "Common-Framework"
+        channelUrl = props[productName]
+        if (channelUrl) {
+            println "INFO: Channel URL found for Common-Framework"
+            return channelUrl
+        } else {
+            println "WARN: No channel URL configured for Common-Framework"
+            return null
+        }
+    }
+    
+    def matcher = buildUrl =~ /\/job\/API-Products\/job\/([^\/]+)/
+    if (matcher.find()) {
+        productName = matcher.group(1)
+        println "INFO: API-Products detected: ${productName}"
+    } else {
+        println "WARN: Skipping team notification for this build, unable to extract the capability folder name from the URL: ${buildUrl}"
+        return null
+    }
+    
+    channelUrl = props[productName]
+    if (channelUrl) {
+        println "INFO: Channel URL found for ${productName}"
+        return channelUrl
+    }
+    return null
+}
+
+// RENAMED METHOD - this was the problem!
+def sendToTeamsChannel(String buildDataJson, String channelUrl) {
+    def escapedJson = buildDataJson.replace("'", "'\\''")
+    def responseCode = sh(
+        script: """curl -k -w '%{http_code}' -H 'Content-Type: application/json' -H 'Accept: application/json' -X POST '${channelUrl}' -d '${escapedJson}' -s""",
+        returnStdout: true
+    ).trim()
+    println "INFO: The received HTTP response code from DevOps teams channel curl request: ${responseCode}"
+}
+========================================
+    ===================================
+    updateglobalcounetrfile for testing in poc jenkins
 
 def call(def countValReset, def mockCount = null) {
 
