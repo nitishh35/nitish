@@ -1,3 +1,81 @@
+updateglobalcounetrfile for testing in poc jenkins
+
+def call(def countValReset, def mockCount = null) {
+
+    def envProperty = loadEnvironmentProperties()
+
+    def counterFile          = envProperty.fortify_global_counter_file
+    def fortifyApiToken      = envProperty.fortify_api_credential_id
+    def fortifyApiURL        = envProperty.fortify_api_url
+    def pendingJobThreshold  = envProperty.fortify_count_threshold as Integer
+
+    def notificationEnabled =
+        (envProperty.fortify_notification_enabled == null) ?
+            true :
+            envProperty.fortify_notification_enabled.toLowerCase() == "true"
+
+    if (!notificationEnabled) {
+        println "INFO: Fortify Team Notification is DISABLED. Skipping notification processing."
+        return
+    }
+
+    // ---------------------------------------
+    // Read notification state (true / false)
+    // ---------------------------------------
+    def notified = false
+
+    if (fileExists(counterFile)) {
+        def content = readFile(counterFile).trim()
+
+        if (content.equalsIgnoreCase("true")) {
+            notified = true
+        } else if (content.equalsIgnoreCase("false")) {
+            notified = false
+        } else {
+            println "WARN: Counter file invalid. Resetting to false."
+            writeFile(file: counterFile, text: "false\n")
+            notified = false
+        }
+
+        println "INFO: Previous notification state: ${notified}"
+    } else {
+        println "WARN: Counter file missing. Creating new one with false."
+        writeFile(file: counterFile, text: "false\n")
+        notified = false
+    }
+
+    // ---------------------------------------
+    // Get Fortify pending job count
+    // ---------------------------------------
+    def fortifyScanCount = (mockCount != null)
+        ? mockCount
+        : getFortifyPendingJobsCount(fortifyApiToken, fortifyApiURL)
+
+    println "INFO: Fortify pending job count: ${fortifyScanCount}"
+
+    // ---------------------------------------
+    // FAILURE case → notify once
+    // ---------------------------------------
+    if (fortifyScanCount > pendingJobThreshold) {
+
+        if (!notified) {
+            println "INFO: Threshold exceeded. FIRST FAILURE. Sending notification."
+            notifyTeamsChannel()
+            writeFile(file: counterFile, text: "true\n")
+        } else {
+            println "INFO: Threshold exceeded but already notified earlier. Skipping."
+        }
+        return
+    }
+
+    // ---------------------------------------
+    // SUCCESS case → reset state
+    // ---------------------------------------
+    println "INFO: Fortify job count normal. Resetting notification state."
+    writeFile(file: counterFile, text: "false\n")
+}
+
+=====================================================================
 updateglobalcounetrfile
 
 def call(def countValReset) {
