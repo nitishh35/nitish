@@ -1,11 +1,8 @@
 
-updateglobalcounetrfile
-
-def call(def countValReset = null, def mockCount = null) {
+updateglobalcounter for poc job
+    def call(def countValReset = null, def mockCount = null) {
     def envProperty = loadEnvironmentProperties()
     def counterFile = envProperty.fortify_global_counter_file
-    def fortifyApiToken = envProperty.fortify_api_credential_id
-    def fortifyApiURL = envProperty.fortify_api_url
     def pendingJobThreshold = envProperty.fortify_count_threshold as Integer
     def notificationEnabled = (envProperty.fortify_notification_enabled == null) ? 
         true : envProperty.fortify_notification_enabled.toLowerCase() == "true"
@@ -34,9 +31,9 @@ def call(def countValReset = null, def mockCount = null) {
         notified = false
     }
     
-    // Get the count (use mock if provided, otherwise call API)
-    def fortifyScanCount = (mockCount != null) ? mockCount : getFortifyPendingJobsCount(fortifyApiToken, fortifyApiURL)
-    println "INFO: Fortify pending job count: ${fortifyScanCount}"
+    // Use mockCount for testing
+    def fortifyScanCount = mockCount
+    println "INFO: Fortify pending job count (MOCK): ${fortifyScanCount}"
     
     // Check if threshold is exceeded
     if (fortifyScanCount > pendingJobThreshold) {
@@ -54,13 +51,85 @@ def call(def countValReset = null, def mockCount = null) {
     println "INFO: Fortify job count normal. Resetting notification state."
     writeFile(file: counterFile, text: "false\n")
 }
+--------------------------------
+
+    // Test 1: First breach - should notify and set file to "true"
+fortifyNotification(null, 150)  // Assuming threshold is 100
+
+// Test 2: Breach while already notified - should skip notification
+fortifyNotification(null, 150)  // File is "true", won't notify again
+
+// Test 3: Recovery - should reset file to "false"
+fortifyNotification(null, 50)   // Below threshold, resets to "false"
+
+// Test 4: Breach again after recovery - should notify again
+fortifyNotification(null, 150)  // File was "false", will notify and set to "true"
+=================================================================
+
+updateglobalcounetrfile
+
+def call(def countValReset) {
+    def envProperty = loadEnvironmentProperties()
+    def counterFile = envProperty.fortify_global_counter_file
+    def fortifyApiToken = envProperty.fortify_api_credential_id
+    def fortifyApiURL = envProperty.fortify_api_url
+    def pendingJobThreshold = envProperty.fortify_count_threshold as Integer
+    def notificationEnabled = (envProperty.fortify_notification_enabled == null) ?
+        true : envProperty.fortify_notification_enabled.toLowerCase() == "true"
+    
+    if (!notificationEnabled) {
+        println "INFO: Fortify Team Notification is DISABLED. Skipping notification processing."
+        return
+    }
+    
+    def notified = false
+    
+    // Read existing notification state
+    if (fileExists(counterFile)) {
+        def content = readFile(counterFile).trim()
+        if (content.equalsIgnoreCase("true")) {
+            notified = true
+        } else if (content.equalsIgnoreCase("false")) {
+            notified = false
+        } else {
+            println "WARN: Counter file invalid. Resetting to false"
+            writeFile(file: counterFile, text: "false\n")
+            notified = false
+        }
+        println "INFO: Previous notification state: ${notified}"
+    } else {
+        println "WARN: No global counter file found. Creating with initial state: false"
+        writeFile(file: counterFile, text: "false\n")
+        notified = false
+    }
+    
+    // Get current Fortify job count
+    def fortifyScanCount = getFortifyPendingJobsCount(fortifyApiToken, fortifyApiURL)
+    println "INFO: Fortify pending job count: ${fortifyScanCount}"
+    
+    // Check threshold and handle notification
+    if (fortifyScanCount > pendingJobThreshold) {
+        if (!notified) {
+            println "INFO: Threshold exceeded. FIRST FAILURE. Sending notification."
+            notifyTeamsChannel()
+            writeFile(file: counterFile, text: "true\n")
+        } else {
+            println "INFO: Threshold exceeded but already notified earlier. Skipping notification."
+        }
+    } else {
+        // IMPORTANT: Reset notification state when count is normal
+        if (notified) {
+            println "INFO: Pending count normal, resetting notification state"
+            writeFile(file: counterFile, text: "false\n")
+        } else {
+            println "INFO: Pending count normal, notification state already false"
+        }
+    }
+}
 
 def getFortifyPendingJobsCount(def fortifyApiToken, def fortifyApiURL) {
     withCredentials([string(credentialsId: fortifyApiToken, variable: 'credentials')]) {
-        def scanResponse = sh(
-            script: "curl -ksH 'Authorization: FortifyToken ${credentials}' '${fortifyApiURL}/cloudjobs?fields=jobState&q=jobState:PENDING'",
-            returnStdout: true
-        ).trim()
+        def scanResponse = sh(script: "curl -ksH 'Authorization: FortifyToken ${credentials}' '${fortifyApiURL}/cloudjobs'", returnStdout: true).trim()
         def jsonResponse = readJSON(text: scanResponse)
         def jobsCount = jsonResponse.count ?: 0
         println "INFO: Pending jobs count in Fortify: ${jobsCount}"
