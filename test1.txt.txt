@@ -1,75 +1,324 @@
-def call() {
-    try {
-        echo "INFO: Preparing Teams notification payload"
+I've created a comprehensive yet concise Confluence article for your DSE DevOps coding standards and pipeline validation guide. Here's what's included:
 
-        // -------------------------------
-        // BUILD STATUS + FAILED STAGE
-        // -------------------------------
-        def buildStatus = currentBuild.result ?: "SUCCESS"
-        def failedStage = (buildStatus == "FAILURE") ? env.failedStage : "NA"
+**Key Sections:**
 
-        // -------------------------------
-        // USER DETAILS
-        // -------------------------------
-        def userInfo = getBuildTriggeredUserDetails()
-        def userName = userInfo.userName ?: "Unknown User"
-        def userEmail = userInfo.userEmail ?: "Unknown Email"
-        def buildUrl = env.BUILD_URL ?: "Unknown URL"
+1. **Code Readability Standards** - Naming conventions and structure with examples
+2. **Pipeline Validation Steps** - 6-step validation process with commands
+3. **Testing External Notifications** - 3 safe testing methods (mock mode, test channels, feature flags)
+4. **DOs and DON'Ts** - Clear tables with 8 DOs and 8 DON'Ts
+5. **Repository & Branch Strategy** - Specific repos for validation with branch flow
+6. **Build & Version Settings** - Jenkins configuration recommendations
+7. **Validation Checklist** - Quick pre-merge checklist
+8. **Quick Reference Examples** - 3 practical code examples
 
-        if (userName == 'SVC-APP-RLCT') {
-            echo "INFO: Notification suppressed for automation user: ${userName}"
-            return
+**Format Features:**
+- Short and crisp with tables for easy scanning
+- Real code examples relevant to your Fortify notification use case
+- Clear visual indicators (✅ ❌ ⚠️)
+- Practical commands and configurations
+- Covers all acceptance criteria
+
+You can copy this directly into Confluence - the markdown formatting will render properly. Would you like me to adjust any section or add more specific examples?
+
+==============================
+
+
+================================
+
+
+===============================
+# DSE DevOps - Code Readability & Pipeline Validation Guide
+
+## 1. Overview
+
+This document establishes coding standards, validation procedures, and best practices for DSE DevOps team members working with Jenkins Pipelines, Shared Libraries, and automation scripts.
+
+---
+
+## 2. Code Readability Standards
+
+### Naming Conventions
+- **Variables**: Use camelCase (`fortifyApiToken`, `pendingJobCount`)
+- **Functions**: Use descriptive verbs (`getFortifyPendingJobsCount`, `notifyTeamsChannel`)
+- **Files**: Use lowercase with hyphens (`fortify-notification.groovy`)
+
+### Code Structure
+- Add comments for complex logic blocks
+- Use consistent indentation (4 spaces)
+- Keep functions under 50 lines where possible
+- Group related variables together
+
+**Example:**
+```groovy
+// Good
+def fortifyApiToken = envProperty.fortify_api_credential_id
+def fortifyApiURL = envProperty.fortify_api_url
+def pendingJobThreshold = envProperty.fortify_count_threshold as Integer
+
+// Bad
+def x = envProperty.fortify_api_credential_id
+def url123 = envProperty.fortify_api_url
+```
+
+---
+
+## 3. Pipeline Validation Steps
+
+### Step-by-Step Validation Process
+
+**Step 1: Create Feature Branch**
+```bash
+git checkout -b feature/your-feature-name
+```
+
+**Step 2: Local Syntax Check**
+```bash
+# For Groovy files
+groovy -cp . yourScript.groovy --compile-only
+```
+
+**Step 3: Use Test Repositories**
+- **DO NOT** validate in production repositories
+- Use designated test repositories:
+  - `dse-devops-test-pipeline`
+  - `dse-sandbox-app`
+  - `dse-validation-project`
+
+**Step 4: Test Build Configuration**
+- **Build Type**: Use `freestyle` or `pipeline` test jobs
+- **Branch**: `feature/*` or `test/*` branches only
+- **Jenkins Instance**: Use `jenkins-dev.company.com` (NOT production)
+
+**Step 5: Run Validation Build**
+```groovy
+// In Jenkinsfile
+pipeline {
+    agent any
+    stages {
+        stage('Validate') {
+            steps {
+                sh 'echo "Running validation..."'
+                // Your validation logic
+            }
         }
-
-        // -------------------------------
-        // FINAL PAYLOAD
-        // -------------------------------
-        def buildData = [
-            pipelineURL      : buildUrl,
-            triggeredBy      : userName,
-            triggeredByEmail : userEmail,
-            status           : buildStatus,
-            stage            : failedStage
-        ]
-
-        def bodyJson = groovy.json.JsonOutput.toJson(buildData)
-
-        echo "INFO: JSON Payload Prepared:"
-        echo bodyJson
-
-        // -------------------------------
-        // CHANNEL URL LOOKUP
-        // -------------------------------
-        def channelUrl = getProductWorkflowChannelUrl()
-        if (!channelUrl) {
-            echo "WARN: No Teams channel URL found. Skipping notification."
-            return
-        }
-
-        // -------------------------------
-        // SEND TO TEAMS
-        // -------------------------------
-        notifyTeam(bodyJson, channelUrl)
-
-    } catch (Exception e) {
-        echo "ERROR: Failed to send Teams notification: ${e.message}"
     }
 }
+```
 
+**Step 6: Code Review & Merge**
+- Create Pull Request
+- Require 2 approvals minimum
+- Merge to `develop` → then `main`
 
-// ----------------------------------------------------------
-// HTTP POST TO TEAMS
-// ----------------------------------------------------------
-def notifyTeam(String json, String channelUrl) {
-    def response = sh(
-        script: """
-            curl -k -s -w '%{http_code}' \\
-                -H 'Content-Type: application/json' \\
-                -X POST '${channelUrl}' \\
-                -d '${json.replace("'", "\\'")}'
-        """,
-        returnStdout: true
-    ).trim()
+---
 
-    echo "INFO: Teams Response Code: ${response}"
+## 4. Testing Changes with External Notifications
+
+### Safe Testing Practices
+
+**⚠️ CRITICAL: Never test notifications in production pipelines**
+
+### Option 1: Mock Notifications (Recommended)
+```groovy
+def notifyTeamsChannel(def mockMode = false) {
+    if (mockMode) {
+        println "MOCK: Would send notification to Teams channel"
+        return
+    }
+    // Actual notification logic
 }
+```
+
+### Option 2: Use Test Channels
+- **Production Channel**: `#dse-prod-alerts` ❌ DO NOT USE
+- **Test Channel**: `#dse-test-notifications` ✅ USE THIS
+
+### Option 3: Feature Flags
+```groovy
+def notificationEnabled = (env.BRANCH_NAME == 'main') ? true : false
+
+if (notificationEnabled) {
+    notifyTeamsChannel()
+}
+```
+
+### Example: Testing Fortify Notifications
+```groovy
+// Add test parameter to your shared library
+def call(def testMode = false) {
+    if (testMode) {
+        println "TEST MODE: Notification skipped"
+        // Test your logic without sending real notifications
+    } else {
+        notifyTeamsChannel()
+    }
+}
+```
+
+---
+
+## 5. DOs and DON'Ts
+
+### ✅ DOs
+
+| Practice | Example |
+|----------|---------|
+| Use descriptive variable names | `def pendingJobThreshold` |
+| Add comments for complex logic | `// Reset notification state after success` |
+| Validate in test repositories | `dse-devops-test-pipeline` |
+| Use feature branches | `feature/fortify-notification` |
+| Enable test mode for notifications | `call(testMode: true)` |
+| Handle errors gracefully | `try { ... } catch (e) { ... }` |
+| Use credentials from Jenkins | `withCredentials([...])` |
+| Log important steps | `println "INFO: Threshold exceeded"` |
+
+### ❌ DON'Ts
+
+| Practice | Why It's Wrong |
+|----------|----------------|
+| Test in production repositories | Risk of impacting live systems |
+| Hardcode credentials | Security vulnerability |
+| Skip code reviews | Reduces code quality |
+| Use generic variable names (`x`, `temp`) | Reduces readability |
+| Send test notifications to production channels | Creates false alerts |
+| Commit directly to `main` branch | Bypasses validation |
+| Use `sleep()` for synchronization | Inefficient, unreliable |
+| Ignore error handling | Causes silent failures |
+
+---
+
+## 6. Repository & Branch Strategy
+
+### Repositories for Validation
+
+| Repository | Purpose | Branch to Use |
+|------------|---------|---------------|
+| `dse-devops-test-pipeline` | Pipeline testing | `feature/*` |
+| `dse-sandbox-app` | Application testing | `test/*` |
+| `dse-shared-libraries-test` | Library validation | `feature/*` |
+| `dse-validation-project` | Integration testing | `develop` |
+
+### Branch Strategy
+
+**Development Flow:**
+```
+feature/* → develop → staging → main (production)
+```
+
+**For Validation:**
+- Create branch: `feature/your-change`
+- Test in: `dse-devops-test-pipeline` repository
+- Merge to: `develop` (after approval)
+- Production release: Merge `develop` → `main`
+
+---
+
+## 7. Recommended Build & Version Settings
+
+### Jenkins Job Configuration
+
+**Build Type:**
+- **New Features**: Pipeline job (Jenkinsfile from SCM)
+- **Quick Tests**: Freestyle job with Groovy script
+
+**Recommended Versions:**
+- **Jenkins**: v2.400+ (LTS)
+- **Groovy**: v2.4.21+
+- **JDK**: OpenJDK 11 or 17
+
+**Build Parameters Example:**
+```groovy
+parameters {
+    booleanParam(name: 'TEST_MODE', defaultValue: true, description: 'Enable test mode')
+    string(name: 'BRANCH_NAME', defaultValue: 'feature/test', description: 'Branch to build')
+    choice(name: 'ENVIRONMENT', choices: ['dev', 'test', 'staging'], description: 'Target environment')
+}
+```
+
+### App Version Tagging
+```bash
+# Semantic versioning
+v1.2.3-dev      # Development
+v1.2.3-rc.1     # Release candidate
+v1.2.3          # Production
+```
+
+---
+
+## 8. Validation Checklist
+
+Before merging your changes, ensure:
+
+- [ ] Code follows naming conventions
+- [ ] Comments added for complex logic
+- [ ] Tested in designated test repository
+- [ ] No hardcoded credentials
+- [ ] External notifications disabled or mocked
+- [ ] Error handling implemented
+- [ ] Feature branch created and used
+- [ ] Code review completed (2+ approvals)
+- [ ] Build successful in test environment
+- [ ] Documentation updated if needed
+
+---
+
+## 9. Quick Reference Examples
+
+### Example 1: Adding Mock Mode to Notification Function
+```groovy
+def notifyTeamsChannel(def testMode = false) {
+    if (testMode) {
+        println "TEST MODE: Skipping Teams notification"
+        return
+    }
+    
+    def webhookUrl = env.TEAMS_WEBHOOK_URL
+    // Send actual notification
+}
+
+// Usage in pipeline
+notifyTeamsChannel(testMode: true)  // For testing
+notifyTeamsChannel(testMode: false) // For production
+```
+
+### Example 2: Safe API Testing
+```groovy
+def getFortifyPendingJobsCount(def mockMode = false) {
+    if (mockMode) {
+        println "MOCK: Returning test count = 5"
+        return 5
+    }
+    
+    // Actual API call
+    withCredentials([...]) {
+        // Real implementation
+    }
+}
+```
+
+### Example 3: Environment-Based Notification
+```groovy
+def shouldNotify() {
+    def environment = env.ENVIRONMENT ?: 'dev'
+    return (environment == 'production')
+}
+
+if (shouldNotify()) {
+    notifyTeamsChannel()
+} else {
+    println "Non-production environment: notification skipped"
+}
+```
+
+---
+
+## 10. Support & Questions
+
+**Contact:**
+- Slack: `#dse-devops-support`
+- Email: `dse-devops@company.com`
+- Documentation: [Internal Wiki](https://wiki.company.com/dse-devops)
+
+**Document Version:** 1.0  
+**Last Updated:** December 2025  
+**Owner:** DSE DevOps Team
