@@ -1,555 +1,107 @@
-Routes destinations must be in either the route's space or the route's shared spaces
+def call(def pcforg, def pcfSpace, def pcfFoundation, def manifestFile, def wiremockJar){
+    def envProperty = loadEnvironmentProperties()
+    def pcfDeployUserId = envProperty.pcf_non_prod_deploy_user_id
+    def pcfDeployCredentialId = envProperty.pcf_non_prod_deploy_credential_id
+    def pcfFoundationUrl = "https://api.sys.${pcfFoundation}.pcf.syfbank.com"
+    def pcfDomain = "app.${pcfFoundation}.pcf.syfbank.com"
+    def cf = envProperty.cf_cli_path  // Add this if available
+    
+    // Read app name from manifest
+    def manifestData = readYaml file: manifestFile
+    def appName = manifestData.applications[0].name
+    
+    withCredentials([string(credentialsId: pcfDeployCredentialId, variable: 'credentials')]){
+        sh "cf login --skip-ssl-validation -a '${pcfFoundationUrl}' -u '${pcfDeployUserId}' -p '${credentials}' -o '${pcfOrg}' -s '${pcfSpace}'"
+        
+        // Push app without route and without starting
+        sh "cf push ${appName} -f '${manifestFile}' -p '${wiremockJar}' --no-route --no-start"
+        
+        // Create route (idempotent - won't fail if exists)
+        sh "cf create-route ${pcfDomain} --hostname ${appName}"
+        
+        // Map route to app
+        sh "cf map-route ${appName} ${pcfDomain} --hostname ${appName}"
+        
+        // Start the app
+        sh "cf start ${appName}"
+        
+        println "INFO: Deployment successful"
+        println "INFO: Application can be accessed at: https://${appName}.${pcfDomain}"
+    }
+}
 
-Based on your manifest file, here's the complete working code to fix the route conflict issue:
+-----------------------------
+Looking at the `staticFileDeployPCFWithManifest.groovy` code from your document, here's how it was handled for the living document:
 
-## 1. Updated `manifest.yml`
+## How Living Document Handled It:
 
-```yaml
+```groovy
+// Create route - ignore if it already exists
+sh "${cf} create-route ${pcfDomain} --hostname ${hostname}"
+
+// Map route to app
+sh "${cf} map-route ${appName} ${pcfDomain} --hostname ${hostname}"
+```
+
+**The key observation:** In the living document code, they simply run `cf create-route` **without any error handling**. 
+
+### Why It Works:
+
+In **newer versions of CF CLI** (version 7+), the `cf create-route` command is **idempotent**, meaning:
+- If the route **doesn't exist** → it creates it
+- If the route **already exists** → it returns a warning but **doesn't fail** the pipeline
+
+So the command succeeds in both cases!
+
 ---
-applications:
-- name: paymybill-api-features
-  path: build
-  buildpack: staticfile_buildpack
-  disk_quota: 256MB
-  memory: 128MB
-  no-route: true
-```
 
-**Key change:** Add `no-route: true` to prevent automatic route creation.
+## What You Should Do for Wiremock:
 
-## 2. Updated `staticFileDeployPCFWithManifest` Function
+**Use the same approach** - just run the command directly:
 
 ```groovy
-def call(def org, def pcfSpace, def pcfFoundation) {
+def call(def pcforg, def pcfSpace, def pcfFoundation, def manifestFile, def wiremockJar){
     def envProperty = loadEnvironmentProperties()
     def pcfDeployUserId = envProperty.pcf_non_prod_deploy_user_id
     def pcfDeployCredentialId = envProperty.pcf_non_prod_deploy_credential_id
+    def pcfFoundationUrl = "https://api.sys.${pcfFoundation}.pcf.syfbank.com"
+    def pcfDomain = "app.${pcfFoundation}.pcf.syfbank.com"
+    def cf = envProperty.cf_cli_path  // Add this if available
     
-    // App name from your manifest
-    def appName = "paymybill-api-features"
+    // Read app name from manifest
+    def manifestData = readYaml file: manifestFile
+    def appName = manifestData.applications[0].name
     
-    // Convert foundation to domain
-    // api.sys.dev1.use1.pcf.syfbank.com -> app.dev1.use1.pcf.syfbank.com
-    def pcfFoundationDomain = pcfFoundation.replace('api.sys.', 'app.')
-    
-    // Extract foundation identifier (dev1.use1, dev1.use2, dev2.dal, dev2.phx)
-    def foundationId = pcfFoundation.tokenize('.')[2..3].join('.')
-    
-    // Create unique hostname: appname-space-foundation
-    // Example: paymybill-api-features-ecom-api-paymybill-qa-dev1-use1
-    def spaceName = pcfSpace.toLowerCase().replaceAll('[^a-z0-9]', '-')
-    def hostname = "${appName}-${spaceName}-${foundationId.replace('.', '-')}"
-    
-    withCredentials([string(credentialsId: pcfDeployCredentialId, variable: 'credentials')]) {
-        sh "cf login --skip-ssl-validation -a '${pcfFoundation}' -u '${pcfDeployUserId}' -p '${credentials}' -o '${org}' -s '${pcfSpace}'"
+    withCredentials([string(credentialsId: pcfDeployCredentialId, variable: 'credentials')]){
+        sh "cf login --skip-ssl-validation -a '${pcfFoundationUrl}' -u '${pcfDeployUserId}' -p '${credentials}' -o '${pcfOrg}' -s '${pcfSpace}'"
         
-        // Push the app (no-route is set in manifest)
-        sh "cf push"
+        // Push app without route and without starting
+        sh "cf push ${appName} -f '${manifestFile}' -p '${wiremockJar}' --no-route --no-start"
         
-        // Map unique route for this space and foundation
-        sh "cf map-route ${appName} ${pcfFoundationDomain} --hostname ${hostname}"
+        // Create route (idempotent - won't fail if exists)
+        sh "cf create-route ${pcfDomain} --hostname ${appName}"
         
-        println "INFO: Successfully deployed ${appName} to ${pcfFoundation}"
-        println "INFO: Route: ${hostname}.${pcfFoundationDomain}"
+        // Map route to app
+        sh "cf map-route ${appName} ${pcfDomain} --hostname ${appName}"
+        
+        // Start the app
+        sh "cf start ${appName}"
+        
+        println "INFO: Deployment successful"
+        println "INFO: Application can be accessed at: https://${appName}.${pcfDomain}"
     }
 }
 ```
 
-## 3. Complete `nodeAppProdDeploy` Function
+---
 
-```groovy
-def call(def pcfOrg, def pcfSpace) {
-    def dev2dal = "YES"
-    def dev2phx = "YES"
-    def dev1east1 = "YES"
-    def dev1east2 = "YES"
-    
-    def foundationData = getPcfFoundationAvailability()
-    
-    if (!foundationData.toString().equalsIgnoreCase("NA")) {
-        dev2dal = (foundationData.DEV2DAL.equalsIgnoreCase('N')) ? "N" : "YES"
-        dev2phx = (foundationData.DEV2PHX.equalsIgnoreCase('N')) ? "N" : "YES"
-        dev1east1 = (foundationData.DEV1EAST1.equalsIgnoreCase('N')) ? "N" : "YES"
-        dev1east2 = (foundationData.DEV1EAST2.equalsIgnoreCase('N')) ? "N" : "YES"
-    }
-    
-    if (dev2dal.equalsIgnoreCase("YES")) {
-        println 'INFO: The app is being deployed to DEV2DAL foundation.'
-        staticFileDeployPCFWithManifest(pcfOrg, pcfSpace, 'api.sys.dev2.dal.pcf.syfbank.com')
-    }
-    
-    if (dev2phx.equalsIgnoreCase("YES")) {
-        println 'INFO: The app is being deployed to DEV2PHX foundation.'
-        staticFileDeployPCFWithManifest(pcfOrg, pcfSpace, 'api.sys.dev2.phx.pcf.syfbank.com')
-    }
-    
-    if (dev1east1.equalsIgnoreCase("YES")) {
-        println 'INFO: The app is being deployed to DEV1EAST1 foundation.'
-        staticFileDeployPCFWithManifest(pcfOrg, pcfSpace, 'api.sys.dev1.use1.pcf.syfbank.com')
-    }
-    
-    if (dev1east2.equalsIgnoreCase("YES")) {
-        println 'INFO: The app is being deployed to DEV1EAST2 foundation.'
-        staticFileDeployPCFWithManifest(pcfOrg, pcfSpace, 'api.sys.dev1.use2.pcf.syfbank.com')
-    }
-}
-```
+## Summary:
 
-## Expected Routes After Deployment:
+The living document **doesn't have special error handling** - it relies on CF CLI's idempotent behavior. The same approach should work for Wiremock! The `cf create-route` command won't fail if the route already exists in modern CF CLI versions.
 
-Assuming `pcfSpace = "Ecom-API-PayMyBill-QA"`:
+**Just ensure:**
+1. Remove routes from `manifest.wiremock.yml`
+2. Use `--no-route --no-start` flags
+3. Create and map routes dynamically (just like living document)
 
-1. **DEV2DAL**: `paymybill-api-features-ecom-api-paymybill-qa-dev2-dal.app.dev2.dal.pcf.syfbank.com`
-2. **DEV2PHX**: `paymybill-api-features-ecom-api-paymybill-qa-dev2-phx.app.dev2.phx.pcf.syfbank.com`
-3. **DEV1USE1**: `paymybill-api-features-ecom-api-paymybill-qa-dev1-use1.app.dev1.use1.pcf.syfbank.com`
-4. **DEV1USE2**: `paymybill-api-features-ecom-api-paymybill-qa-dev1-use2.app.dev1.use2.pcf.syfbank.com`
-
-## What This Solution Does:
-
-1. ✅ Adds `no-route: true` in manifest to prevent automatic route creation
-2. ✅ Extracts foundation identifier (dev1.use1, dev1.use2, etc.)
-3. ✅ Creates unique hostname combining app name + space + foundation
-4. ✅ Maps the route explicitly after deployment
-5. ✅ Each foundation gets its own unique route, avoiding conflicts
-
-This will resolve the "Routes cannot be mapped to destinations in different spaces" error!
-
-==============================================================================
-
-def call(def org, def pcfSpace, def pcfFoundation) {
-    def envProperty = loadEnvironmentProperties()
-    def pcfDeployUserId = envProperty.pcf_non_prod_deploy_user_id
-    def pcfDeployCredentialId = envProperty.pcf_non_prod_deploy_credential_id
-    
-    def appName = "paymybill-api-features"
-    
-    // Convert api.sys.dev2.dal.pcf.syfbank.com -> app.dev2.dal.pcf.syfbank.com
-    def pcfFoundationDomain = pcfFoundation.replace('api.sys.', 'app.')
-    
-    // Create unique hostname based on foundation
-    def foundationShort = ""
-    if (pcfFoundation.contains("dev2.dal")) {
-        foundationShort = "dev2-dal"
-    } else if (pcfFoundation.contains("dev2.phx")) {
-        foundationShort = "dev2-phx"
-    } else if (pcfFoundation.contains("dev1.use1")) {
-        foundationShort = "dev1-use1"
-    } else if (pcfFoundation.contains("dev1.use2")) {
-        foundationShort = "dev1-use2"
-    }
-    
-    def spaceName = pcfSpace.toLowerCase().replaceAll('[^a-z0-9]', '-')
-    def uniqueHostname = "${appName}-${spaceName}-${foundationShort}"
-    
-    withCredentials([string(credentialsId: pcfDeployCredentialId, variable: 'credentials')]) {
-        sh "cf login --skip-ssl-validation -a '${pcfFoundation}' -u '${pcfDeployUserId}' -p '${credentials}' -o '${org}' -s '${pcfSpace}'"
-        
-        println "INFO: Deploying ${appName} with unique route: ${uniqueHostname}.${pcfFoundationDomain}"
-        
-        // Push with no-route (manifest will be used for other settings)
-        sh "cf push --no-route"
-        
-        // Map the unique route
-        sh "cf map-route ${appName} ${pcfFoundationDomain} --hostname ${uniqueHostname}"
-        
-        println "INFO: Deployment successful!"
-        println "INFO: Application URL: https://${uniqueHostname}.${pcfFoundationDomain}"
-    }
-}
-----------------------------------------------
-
-
-date 27 -11
-
-
-def call(def org, def pcfSpace, def pcfFoundation) {
-
-    def envProperty = loadEnvironmentProperties()
-    def pcfDeployUserId = envProperty.pcf_non_prod_deploy_user_id
-    def pcfDeployCredentialId = envProperty.pcf_non_prod_deploy_credential_id
-
-    //--------------------------------------------------------------------
-    // 1. Extract app name from manifest.yml (safe for all YAML formats)
-    //--------------------------------------------------------------------
-    def appName = sh(
-        script: """
-            grep -E '^[[:space:]]*-?[[:space:]]*name:' manifest.yml \
-            | head -1 \
-            | sed 's/.*name:[[:space:]]*//'
-        """,
-        returnStdout: true
-    ).trim()
-
-    if (!appName) {
-        error "Unable to extract app name from manifest.yml"
-    }
-
-    println "INFO: Extracted app name from manifest: ${appName}"
-
-
-    //--------------------------------------------------------------------
-    // 2. Convert API domain → APP domain for ALL foundations
-    //    api.sys.dev2.dal.pcf.syfbank.com  → app.dev2.dal.pcf.syfbank.com
-    //    api.sys.dev1.use1.pcf.syfbank.com → app.dev1.use1.pcf.syfbank.com
-    //--------------------------------------------------------------------
-    def pcfDomain = pcfFoundation.replace("api.sys.", "app.")
-
-
-    //--------------------------------------------------------------------
-    // 3. Hostname = Just the app name (your requirement)
-    //--------------------------------------------------------------------
-    def hostname = appName
-
-
-    //--------------------------------------------------------------------
-    // 4. Login + push + map route
-    //--------------------------------------------------------------------
-    withCredentials([string(credentialsId: pcfDeployCredentialId, variable: 'credentials')]) {
-
-        // CF Login
-        sh """
-            cf login --skip-ssl-validation \
-                -a '${pcfFoundation}' \
-                -u '${pcfDeployUserId}' \
-                -p '${credentials}' \
-                -o '${org}' \
-                -s '${pcfSpace}'
-        """
-
-        println "INFO: Deploying ${appName}"
-        println "INFO: Foundation API URL     = ${pcfFoundation}"
-        println "INFO: Route Domain (app.*)    = ${pcfDomain}"
-        println "INFO: Hostname                = ${hostname}"
-        println "INFO: Final URL: https://${hostname}.${pcfDomain}"
-
-
-        //---------------------------------------------------------------
-        // Push without default route (required)
-        //---------------------------------------------------------------
-        sh "cf push ${appName} --no-route"
-
-
-        //---------------------------------------------------------------
-        // Map custom route (this creates your Storybook-style URL)
-        //---------------------------------------------------------------
-        sh "cf map-route ${appName} ${pcfDomain} --hostname ${hostname}"
-
-
-        println "INFO: Deployment successful!"
-        println "INFO: Application URL → https://${hostname}.${pcfDomain}"
-    }
-}
-sh """
-    cf login --skip-ssl-validation -a '${pcfFoundation}' -u '${pcfDeployUserId}' -p '${credentials}' -o '${org}' -s '${pcfSpace}'
-"""
-
-==================================
-
-
-with cf push route
-
-def call(def org, def pcfSpace, def pcfFoundation) {
-
-    def envProperty = loadEnvironmentProperties()
-    def pcfDeployUserId = envProperty.pcf_non_prod_deploy_user_id
-    def pcfDeployCredentialId = envProperty.pcf_non_prod_deploy_credential_id
-
-    //--------------------------------------------------------------------
-    // 1. Extract app name from manifest.yml safely
-    //--------------------------------------------------------------------
-    def appName = sh(
-        script: """
-            grep -E '^[[:space:]]*-?[[:space:]]*name:' manifest.yml \
-            | head -1 \
-            | sed 's/.*name:[[:space:]]*//'
-        """,
-        returnStdout: true
-    ).trim()
-
-    if (!appName) {
-        error "Unable to extract app name from manifest.yml"
-    }
-
-    println "INFO: Extracted app name: ${appName}"
-
-
-    //--------------------------------------------------------------------
-    // 2. Convert ANY api.sys.* → app.*
-    //--------------------------------------------------------------------
-    def pcfDomain = pcfFoundation.replace("api.sys.", "app.")
-    def fullRoute = "${appName}.${pcfDomain}"
-
-
-    //--------------------------------------------------------------------
-    // 3. Login + cf push --route
-    //--------------------------------------------------------------------
-    withCredentials([string(credentialsId: pcfDeployCredentialId, variable: 'credentials')]) {
-
-        sh """
-            cf login \\
-                --skip-ssl-validation \\
-                -a '${pcfFoundation}' \\
-                -u '${pcfDeployUserId}' \\
-                -p '${credentials}' \\
-                -o '${org}' \\
-                -s '${pcfSpace}'
-        """
-
-        println "INFO: Deploying ${appName} using cf push --route"
-        println "INFO: Foundation API: ${pcfFoundation}"
-        println "INFO: App Domain    : ${pcfDomain}"
-        println "INFO: Route         : ${fullRoute}"
-
-        // 🚀 Push with custom route directly
-        sh """
-            cf push ${appName} \\
-              --route ${fullRoute}
-        """
-
-        println "INFO: Deployment successful!"
-        println "INFO: Final Application URL: https://${fullRoute}"
-    }
-}
-======================================
-
-
-with appbin/cf/cli
-
-def call(def org, def pcfSpace, def pcfFoundation) {
-
-    def envProperty = loadEnvironmentProperties()
-    def pcfDeployUserId = envProperty.pcf_non_prod_deploy_user_id
-    def pcfDeployCredentialId = envProperty.pcf_non_prod_deploy_credential_id
-
-    //--------------------------------------------------------------------
-    // 1. Extract app name from manifest.yml safely
-    //--------------------------------------------------------------------
-    def appName = sh(
-        script: """
-            grep -E '^[[:space:]]*-?[[:space:]]*name:' manifest.yml \
-            | head -1 \
-            | sed 's/.*name:[[:space:]]*//'
-        """,
-        returnStdout: true
-    ).trim()
-
-    if (!appName) {
-        error "Unable to extract app name from manifest.yml"
-    }
-
-    println "INFO: Extracted app name: ${appName}"
-
-
-    //--------------------------------------------------------------------
-    // 2. Convert ANY api.sys.* → app.*
-    //--------------------------------------------------------------------
-    def pcfDomain = pcfFoundation.replace("api.sys.", "app.")
-    def fullRoute = "${appName}.${pcfDomain}"
-
-    println "INFO: Final app domain           : ${pcfDomain}"
-    println "INFO: Final route (hostname+domain): https://${fullRoute}"
-
-
-    //--------------------------------------------------------------------
-    // 3. Login + cf push --route
-    //--------------------------------------------------------------------
-    withCredentials([string(credentialsId: pcfDeployCredentialId, variable: 'credentials')]) {
-
-        // Use cf from: /appbin/cf_cli/cf
-        def CF = "/appbin/cf_cli/cf"
-
-        sh """
-            ${CF} login \\
-                --skip-ssl-validation \\
-                -a '${pcfFoundation}' \\
-                -u '${pcfDeployUserId}' \\
-                -p '${credentials}' \\
-                -o '${org}' \\
-                -s '${pcfSpace}'
-        """
-
-        println "INFO: Using CF CLI v8 (supports --route)"
-        println "INFO: Running cf push with custom route"
-
-
-        //---------------------------------------------------------------
-        // 🚀 PUSH WITH CUSTOM ROUTE
-        //---------------------------------------------------------------
-        sh """
-            ${CF} push ${appName} --route ${fullRoute}
-        """
-
-        println "INFO: Deployment successful!"
-        println "INFO: Application URL → https://${fullRoute}"
-    }
-}
-
-cf create-domain RC-Digital-Solutions app.dev1.use1.pcf.syfbank.com
-cf create-domain RC-Digital-Solutions app.dev1.use2.pcf.syfbank.com
-
-==============================
-
-with imran approach
-
-
-def call(def org, def pcfSpace, def pcfFoundation) {
-
-    def envProperty = loadEnvironmentProperties()
-    def pcfDeployUserId = envProperty.pcf_non_prod_deploy_user_id
-    def pcfDeployCredentialId = envProperty.pcf_non_prod_deploy_credential_id
-
-    //--------------------------------------------------------------------
-    // Extract app name from manifest.yml
-    //--------------------------------------------------------------------
-    def appName = sh(
-        script: """
-            grep -E '^[[:space:]]*-?[[:space:]]*name:' manifest.yml \
-            | head -1 \
-            | sed 's/.*name:[[:space:]]*//'
-        """,
-        returnStdout: true
-    ).trim()
-
-    if (!appName) error "Unable to extract app name from manifest.yml"
-
-
-    //--------------------------------------------------------------------
-    // Build domain + hostname
-    //--------------------------------------------------------------------
-    def pcfDomain = pcfFoundation.replace("api.sys.", "app.")
-    def hostname  = "${appName}-qa"
-    def CF = "/appbin/cf_cli/cf"
-
-    println "INFO: Using CF CLI v8 syntax"
-    println "INFO: Route will be: https://${hostname}.${pcfDomain}"
-
-
-    //--------------------------------------------------------------------
-    // CF Login + push + create-route + map-route + start
-    //--------------------------------------------------------------------
-    withCredentials([string(credentialsId: pcfDeployCredentialId, variable: 'credentials')]) {
-
-        // LOGIN
-        sh """
-            ${CF} login \\
-              --skip-ssl-validation \\
-              -a '${pcfFoundation}' \\
-              -u '${pcfDeployUserId}' \\
-              -p '${credentials}' \\
-              -o '${org}' \\
-              -s '${pcfSpace}'
-        """
-
-        // 1. Push WITHOUT route & WITHOUT starting
-        sh """
-            ${CF} push ${appName} --no-route --no-start
-        """
-
-        // 2. Create route (CF CLI v8 syntax)
-        sh """
-            ${CF} create-route ${pcfDomain} --hostname ${hostname}
-        """
-
-        // 3. Map route
-        sh """
-            ${CF} map-route ${appName} ${pcfDomain} --hostname ${hostname}
-        """
-
-        // 4. Start app
-        sh """
-            ${CF} start ${appName}
-        """
-
-        println "INFO: Deployment successful!"
-        println "INFO: Application URL: https://${hostname}.${pcfDomain}"
-    }
-}
-
-======================================================================
-
-
-final code
-
-def call(def org, def pcfSpace, def pcfFoundation) {
-
-    def envProperty = loadEnvironmentProperties()
-    def pcfDeployUserId = envProperty.pcf_non_prod_deploy_user_id
-    def pcfDeployCredentialId = envProperty.pcf_non_prod_deploy_credential_id
-
-    //--------------------------------------------------------------------
-    // 1. Load CF CLI path from properties
-    //--------------------------------------------------------------------
-    def CF = envProperty.cf_cli_path
-    if (!CF) {
-        error "Missing property: cf_cli_path in pipeline-environment-config.properties"
-    }
-
-    //--------------------------------------------------------------------
-    // 2. Extract app name using readYaml
-    //--------------------------------------------------------------------
-    def manifest = readYaml file: "manifest.yml"
-    def appName = manifest.applications[0].name
-
-    if (!appName) {
-        error "Unable to extract app name from manifest.yml"
-    }
-
-    //--------------------------------------------------------------------
-    // 3. Build domain + hostname
-    //--------------------------------------------------------------------
-    def pcfDomain = pcfFoundation.replace("api.sys.", "app.")
-    def hostname  = "${appName}-qa"
-
-    println "INFO: CF CLI Path = ${CF}"
-    println "INFO: Final Route = https://${hostname}.${pcfDomain}"
-
-
-    //--------------------------------------------------------------------
-    // 4. CF login + push + create-route + map-route + start
-    //--------------------------------------------------------------------
-    withCredentials([string(credentialsId: pcfDeployCredentialId, variable: 'credentials')]) {
-
-        // LOGIN
-        sh """
-            ${CF} login \\
-              --skip-ssl-validation \\
-              -a '${pcfFoundation}' \\
-              -u '${pcfDeployUserId}' \\
-              -p '${credentials}' \\
-              -o '${org}' \\
-              -s '${pcfSpace}'
-        """
-
-        // PUSH WITHOUT ROUTE
-        sh """
-            ${CF} push ${appName} --no-route --no-start
-        """
-
-        // CREATE ROUTE (CF CLI v8 syntax)
-        sh """
-            ${CF} create-route ${pcfDomain} --hostname ${hostname}
-        """
-
-        // MAP ROUTE
-        sh """
-            ${CF} map-route ${appName} ${pcfDomain} --hostname ${hostname}
-        """
-
-        // START APP
-        sh """
-            ${CF} start ${appName}
-        """
-
-        println "INFO: Deployment successful!"
-        println "INFO: App URL: https://${hostname}.${pcfDomain}"
-    }
-}
-
-
-
-
-
-
-
-
-
+That's it! 🎯
