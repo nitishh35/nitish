@@ -1,3 +1,48 @@
+def call(pcfOrg, pcfSpace, pcfFoundation, manifestFile, wiremockJar){
+    def envProperty = loadEnvironmentProperties()
+    
+    // Debug: Print all environment properties
+    println "DEBUG: All envProperty keys = ${envProperty.keySet()}"
+    println "DEBUG: envProperty.cf_cli_path = '${envProperty.cf_cli_path}'"
+    println "DEBUG: envProperty['cf_cli_path'] = '${envProperty['cf_cli_path']}'"
+    
+    def pcfDeployUserId = envProperty.pcf_non_prod_deploy_user_id
+    def pcfDeployCredentialId = envProperty.pcf_non_prod_deploy_credential_id
+    def pcfFoundationUrl = "https://api.sys.${pcfFoundation}.pcf.syfbank.com"
+    def pcfDomain = "app.${pcfFoundation}.pcf.syfbank.com"
+    
+    // Try different ways to get cf_cli_path
+    def cf = envProperty.cf_cli_path ?: envProperty['cf_cli_path'] ?: '/appbin/cf_cli/cf'
+    
+    println "DEBUG: cf value after assignment = '${cf}'"
+    
+    // If still null, use hardcoded path based on your config
+    if (cf == null || cf == 'null' || cf.toString().trim().isEmpty()) {
+        cf = '/appbin/cf_cli/cf'
+        println "WARNING: cf_cli_path was null, using hardcoded path: ${cf}"
+    }
+    
+    def manifestData = readYaml file: manifestFile
+    def appName = manifestData.applications[0].name
+    
+    println "DEBUG: Using cf path = '${cf}'"
+    println "DEBUG: pcfOrg = '${pcfOrg}'"
+    println "DEBUG: pcfSpace = '${pcfSpace}'"
+    println "DEBUG: pcfDeployUserId = '${pcfDeployUserId}'"
+    
+    withCredentials([string(credentialsId: pcfDeployCredentialId, variable: 'credentials')]){
+        sh "'${cf}' login --skip-ssl-validation -a '${pcfFoundationUrl}' -u '${pcfDeployUserId}' -p '${credentials}' -o '${pcfOrg}' -s '${pcfSpace}'"
+        
+        sh "'${cf}' push ${appName} -f '${manifestFile}' -p '${wiremockJar}' --no-route --no-start"
+        sh "'${cf}' create-route ${pcfDomain} --hostname ${appName}"
+        sh "'${cf}' map-route ${appName} ${pcfDomain} --hostname ${appName}"
+        sh "'${cf}' start ${appName}"
+        
+        println "INFO: Deployment successful"
+        println "INFO: Application can be accessed at: https://${appName}.${pcfDomain}"
+    }
+}
+=================================================================
 def call(def pcforg, def pcfSpace, def pcfFoundation, def manifestFile, def wiremockJar){
     def envProperty = loadEnvironmentProperties()
     def pcfDeployUserId = envProperty.pcf_non_prod_deploy_user_id
