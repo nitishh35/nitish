@@ -4,30 +4,29 @@ def call() {
     def fortifyWorkFlowUrl = envProperty.fortify_workflow_url
     def emailAddressList = envProperty.to_email_address_list
     def fortifyChannelEmails = envProperty.fortify_channel_emails_json
-    def pipelineUrl = env.BUILD_URL ?: ""
     
-    def baseDevOpsJson = createEmailJson(emailAddressList, pipelineUrl)
-    println "INFO: DevOps JSON to send: ${baseDevOpsJson}"
-    def escapedDevOpsJson = baseDevOpsJson.replace("'", "'\\''")
-    def devopsChannelResponseCode = sh(
-        script: "curl -s -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' -H 'Accept: application/json' -X POST '${devopsWorkFlowUrl}' -d '${escapedDevOpsJson}'",
-        returnStdout: true
-    ).trim()
-    println "INFO: DevOps Teams channel response code: ${devopsChannelResponseCode}"
-    
-    def enrichedFortifyJson = createEmailJson(fortifyChannelEmails, pipelineUrl)
-    println "INFO: Fortify JSON to send: ${enrichedFortifyJson}"
-    def escapedFortifyJson = enrichedFortifyJson.replace("'", "'\\''")
-    def fortifyChannelResponseCode = sh(
-        script: "curl -s -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' -H 'Accept: application/json' -X POST '${fortifyWorkFlowUrl}' -d '${escapedFortifyJson}'",
-        returnStdout: true
-    ).trim()
-    println "INFO: Fortify support channel response code: ${fortifyChannelResponseCode}"
+    sendNotification(devopsWorkFlowUrl, createChannelJson(emailAddressList), "DevOps")
+    sendNotification(fortifyWorkFlowUrl, createChannelJson(fortifyChannelEmails), "Fortify")
 }
 
-def createEmailJson(def emailAddressList, def pipelineUrl) {
-    def emails = emailAddressList.split(',')
+def sendNotification(def workflowUrl, def jsonPayload, def channelName) {
+    println "INFO: ${channelName} json to send: ${jsonPayload}"
+    def escapedJson = jsonPayload.replace("'", "'\\''")
+    def response = sh(
+        script: "curl -s -w '%{http_code}' -H 'Content-Type: application/json' -H 'Accept: application/json' -X POST '${workflowUrl}' -d '${escapedJson}'",
+        returnStdout: true
+    ).trim()
+    println "INFO: ${channelName} channel response: ${response}"
+    
+    if (!response.startsWith("2")) {
+        println "WARN: ${channelName} notification failed with response: ${response}"
+    }
+}
+
+def createChannelJson(def emailInput) {
+    def pipelineUrl = env.BUILD_URL ?: ""
     def emailMap = [:]
+    def emails = emailInput ? emailInput.split(',') : []
     
     emails.eachWithIndex { email, index ->
         emailMap["email${index + 1}"] = email.trim()
@@ -35,7 +34,7 @@ def createEmailJson(def emailAddressList, def pipelineUrl) {
     
     emailMap["pipelineUrl"] = pipelineUrl
     def jsonString = groovy.json.JsonOutput.toJson(emailMap)
-    println "INFO: Email JSON created: ${jsonString}"
+    println "INFO: Channel json created: ${jsonString}"
     return jsonString
 }
 =============================================================================
