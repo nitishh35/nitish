@@ -1,7 +1,7 @@
 def notificationEnabled =
     (envProperty.fortify_notification_enabled != null &&
      envProperty.fortify_notification_enabled.toLowerCase() == "true")
-
+println "DEBUG: fortify_notification_enabled raw value = '${envProperty.fortify_notification_enabled}'" println "DEBUG: notificationEnabled evaluated = ${notificationEnabled}"
 
 updateglobalcounterfile
 def call() {
