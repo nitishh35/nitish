@@ -1,3 +1,8 @@
+def notificationEnabled =
+    (envProperty.fortify_notification_enabled != null &&
+     envProperty.fortify_notification_enabled.toLowerCase() == "true")
+
+
 updateglobalcounterfile
 def call() {
     def envProperty = loadEnvironmentProperties()
