@@ -1,3 +1,29 @@
+node {
+    try {
+        stage('Run Main Job') {
+            echo 'Running upstream job logic'
+            // your actual build steps here
+        }
+
+        stage('Trigger Downstream Job') {
+            if (currentBuild.result == null || currentBuild.result == 'SUCCESS') {
+                echo "Triggering downstream job: downstream-job-name"
+
+                build job: 'downstream-job-name',
+                      wait: false,
+                      propagate: false
+            } else {
+                echo "Skipping downstream trigger. Build result: ${currentBuild.result}"
+            }
+        }
+    }
+    catch (err) {
+        currentBuild.result = 'FAILURE'
+        throw err
+    }
+}
+_----------
+
 stage('Trigger Downstream Job') {
     when {
         expression {
