@@ -1,3 +1,19 @@
+stage('Trigger Downstream Job') {
+    when {
+        expression {
+            currentBuild.currentResult == 'SUCCESS'
+        }
+    }
+    steps {
+        echo "Triggering downstream job: downstream-job-name"
+
+        build job: 'downstream-job-name',
+              wait: false,        // true = wait for downstream to finish
+              propagate: false    // true = fail this job if downstream fails
+    }
+}
+
+--------
 def call() {
     def envProperty = loadEnvironmentProperties()
     def devopsWorkFlowUrl = envProperty.devops_workflow_url
