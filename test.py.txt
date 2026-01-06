@@ -1,3 +1,35 @@
+node {
+
+    stage('Checkout') {
+        checkout scm
+    }
+
+    stage('Validate Java Version') {
+
+        def jdkHome = tool name: 'jdk-21', type: 'hudson.model.JDK'
+
+        withEnv([
+            "JAVA_HOME=${jdkHome}",
+            "PATH=${jdkHome}/bin:${env.PATH}"
+        ]) {
+            sh '''
+                echo "==== JAVA ENV DETAILS ===="
+                echo "JAVA_HOME=$JAVA_HOME"
+                which java
+
+                echo "==== JAVA VERSION ===="
+                java -version
+            '''
+        }
+    }
+
+    stage('Result') {
+        echo 'JDK 21 validation completed successfully'
+    }
+}
+
+
+--------
 def call(def pcfOrg, def pcfSpace) {
 
     // DEFAULT: assume all foundations are available
@@ -52,3 +84,4 @@ def call(def pcfOrg, def pcfSpace) {
         error "ERROR: No PCF foundation is available for deployment."
     }
 }
+
