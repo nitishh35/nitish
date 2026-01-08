@@ -1,3 +1,36 @@
+
+node {
+    stage('Trigger All Jobs in Parallel') {
+
+        def jobs = [
+            'job1',
+            'job2',
+            'job3',
+            'job4',
+            'job5',
+            'job6',
+            'job7',
+            'job8',
+            'job9'
+        ]
+
+        def parallelJobs = [:]
+
+        for (job in jobs) {
+            parallelJobs[job] = {
+                echo "Triggering ${job}"
+                build job: job,
+                      wait: false,
+                      propagate: false
+            }
+        }
+
+        parallel parallelJobs
+    }
+}
+
+
+_-----------------------------
 node {
     try {
         stage('Run Main Job') {
