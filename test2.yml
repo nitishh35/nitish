@@ -1,3 +1,10 @@
+| Scenario                                   | Alert Sent |
+| ------------------------------------------ | ---------- |
+| Pending count > threshold, no timeout      | ❌ No       |
+| Pending count > threshold, timeout happens | ✅ Yes      |
+| Pending count ≤ threshold                  | ❌ No       |
+
+
 second approach
 ================================================>>>>>>>>>>>>>>>>>>
 fortifyscan
