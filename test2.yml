@@ -1,194 +1,375 @@
-def call(pcfOrg, pcfSpace, pcfFoundation, manifestFile, wiremockJar){
+second approach
+================================================>>>>>>>>>>>>>>>>>>
+fortifyscan
+def call(def jdkTool = null, def fortifyAppName, def gitProjectKey, def gitRepositoryName, def gitPullRequestId, def fortifyVersion, def gitBranch) {
+
     def envProperty = loadEnvironmentProperties()
-    def pcfDeployUserId = envProperty.pcf_non_prod_deploy_user_id
-    def pcfDeployCredentialId = envProperty.pcf_non_prod_deploy_credential_id
-    def pcfFoundationUrl = "https://api.sys.${pcfFoundation}.pcf.syfbank.com"
-    def pcfDomain = "app.${pcfFoundation}.pcf.syfbank.com"
-    def cf = envProperty.cf_cli_path
-    
-    println "DEBUG: cf_cli_path = '${cf}'"
-    println "DEBUG: pipelineEnv = '${env.pipelineEnv}'"
-    println "DEBUG: pcfSpace = '${pcfSpace}'"
-    
-    def manifestData = readYaml file: manifestFile
-    def appName = manifestData.applications[0].name
-    
-    if (!appName) {
-        buildFailed("Unable to extract app name from ${manifestFile}")
+    def jdkVersion = jdkTool ?: envProperty.default_jdk
+    def mavenTool = envProperty.maven_tool
+    def gradleTool = envProperty.gradle_tool
+    def nexusRepoGroupUrl = envProperty.nexus_repo_group_url
+    def nexusRepoCredential = envProperty.nexus_repo_auth_credential_id
+    def fortifyScancentralURL = envProperty.fortify_scancentral_url
+    def fortifyApiURL = envProperty.fortify_api_url
+    def fortifyWebURL = envProperty.fortify_web_url
+    def fortifyApiToken = envProperty.fortify_api_credential_id
+    def fortifyUploadToken = envProperty.fortify_upload_credential_id
+    def fortifyScancentralExecutablePath = envProperty.fortify_scancentral_path_current
+    def fortifyTimeout = envProperty.fortify_timeout as Integer
+    def fortifyTimeoutUnits = envProperty.fortify_timeout_units
+
+    println "INFO: Fortify scan timeout value and units: ${fortifyTimeout}-${fortifyTimeoutUnits}"
+
+    try {
+        // Reset alert state before scan starts (if count is normal)
+        managefortifyalertsstate(false)
+        
+        timeout(time: fortifyTimeout, unit: fortifyTimeoutUnits) {
+
+            if (env.pipelineEnv.equals('prod') && (env.fortifyEngineUpgradeFlag.equalsIgnoreCase('yes'))) {
+                println "INFO: Fortify scan engine new version selected ${env.fortifyEngineUpgradeFlag}"
+                fortifyScancentralExecutablePath = envProperty.fortify_scancentral_path_new
+            }
+
+            println "INFO: Fortify scancentral executable path selected ${fortifyScancentralExecutablePath}"
+
+            def fortifyScanId = getFortifyProjectScanId(fortifyApiToken, fortifyApiURL, fortifyAppName, fortifyVersion)
+            def fortifyArtifactId = getFortifyArtifactId(fortifyApiToken, fortifyApiURL, fortifyScanId)
+
+            if (fortifyArtifactId != null) {
+                def lastbuildEngineVersion = getLastBuildUsedEngineVersion(fortifyApiToken, fortifyApiURL, fortifyArtifactId)
+                if (lastbuildEngineVersion != null) {
+                    def fortifyVersionSelected = getForifyVersionFromExecutablePath(fortifyScancentralExecutablePath)
+                    if (fortifyVersionSelected < lastbuildEngineVersion) {
+                        buildFailed("The previous Fortify scan was performed using a newer Fortify engine version ${lastbuildEngineVersion} and reverting to an older version ${fortifyVersionSelected} is not allowed. Please select the newer Fortify engine version to proceed.")
+                    }
+                }
+            }
+
+            withEnv(["JAVA_HOME=${tool jdkVersion}", "PATH+JAVA=${tool jdkVersion}/bin", "PATH+MAVEN=${tool jdkVersion}/bin:${tool mavenTool}/bin", "PATH+GRADLE=${tool jdkVersion}/bin:${tool gradleTool}/bin"]) {
+                withCredentials([usernamePassword(credentialsId: nexusRepoCredential, usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD'),
+                                string(credentialsId: fortifyUploadToken, variable: 'credentials')]) {
+
+                    def fortifyScanOptions = getFortifyScanOptions(nexusRepoGroupUrl, nexusRepoCredential, gitRepositoryName, fortifyUploadToken)
+                    def fortifyScanCommand = "${fortifyScancentralExecutablePath} -url ${fortifyScancentralURL} start -bt ${fortifyScanOptions} -upload -uptoken ${credentials} -application ${fortifyAppName} -version ${fortifyVersion} -block -f ${gitRepositoryName}.fpr"
+
+                    sh "${fortifyScanCommand}"
+                }
+            }
+
+            def issuesResponseContent = getIssuesResponse(fortifyApiToken, fortifyApiURL, fortifyScanId)
+            def fortifyResultStr = ""
+
+            if (issuesResponseContent.count > 0) {
+                fortifyResultStr = "Fortify Issues Summary: \\n\\n CATEGORY | CRITICALITY | DEVELOPER STATUS | FILENAME \\n\\n"
+                issuesResponseContent.data.each { key, value ->
+                    if (((key.friority).startsWith('Critical') || (key.friority).startsWith('High'))) {
+                        if ((key.primaryTag).equals(null) || (key.primaryTag) == null || (key.primaryTag).toString() == 'null') {
+                            fortifyResultStr += key.issueName + " | " + key.friority + " | NA | " + key.fullFileName + " \\n"
+                        } else {
+                            fortifyResultStr += key.issueName + " | " + key.friority + " | " + key.primaryTag + " | " + key.fullFileName + " \\n"
+                        }
+                    }
+                }
+            } else {
+                fortifyResultStr = 'No issues were identified during the Fortify scan.'
+            }
+
+            def reportLink = "View Fortify report at ${fortifyWebURL}/ssc/version/${fortifyScanId}/audit"
+            println "INFO: The Fortify report link: ${reportLink}"
+
+            if (gitPullRequestId != 'NA') {
+                def jenkinsJobURL = "Jenkins Job: " + env.BUILD_URL
+                def fortifyResultText = """{"text": "${jenkinsJobURL} \\n\\n ${reportLink} \\n\\n ${fortifyResultStr}"}"""
+                postBitbucketPrComment(gitProjectKey, gitRepositoryName, gitPullRequestId, fortifyResultText)
+            } else {
+                println "INFO: The Fortify result value: ${fortifyResultStr}"
+            }
+
+            def (issuesResponseGroupCritical, issuesResponseGroupHigh) = getFortifyIssuesByGroup(fortifyApiToken, fortifyApiURL, fortifyScanId)
+            def failBuild = false
+
+            if (issuesResponseGroupCritical > 0 || issuesResponseGroupHigh > 0) {
+                failBuild = true
+            }
+
+            def fortifySkip = checkForFortifySkip(fortifyVersion, gitRepositoryName)
+
+            if (fortifySkip.equalsIgnoreCase('N')) {
+                if (issuesResponseContent.data != null) {
+                    if (issuesResponseContent.count > 0) {
+                        issuesResponseContent.data.each { key, value ->
+                            if (((key.friority).startsWith('Critical') || (key.friority).startsWith("High")) && ((fortifyVersion.equalsIgnoreCase('PROD') && failBuild) || (fortifyVersion.equalsIgnoreCase('DEV') && ((key.primaryTag).equals(null) || (key.primaryTag) == null || (key.primaryTag).toString() == 'null')))) {
+                                buildFailed("Vulnerabilities have been identified by the Fortify scan. \nAction Required: Please review the details in the analysis report using the link provided and address the reported issues. \nFortify Report: ${reportLink}")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    } catch (org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e) {
+        // Timeout occurred - send alert if BOTH conditions met:
+        // 1. Timeout occurred (we're here)
+        // 2. Pending count > threshold (checked inside function)
+        println "ERROR: Fortify scan timed out: ${e.message}"
+        managefortifyalertsstate(true)
+        
+        // Re-throw to fail the build
+        throw e
+    }
+}
+
+// Rest of your existing helper functions remain the same...
+
+def getFortifyProjectScanId(def fortifyApiToken, def fortifyApiURL, def fortifyAppName, def fortifyVersion) {
+    withCredentials([string(credentialsId: fortifyApiToken, variable: 'credentials')]) {
+        def projectResponse = sh(script: "curl -ksH 'Authorization: FortifyToken ${credentials}' '${fortifyApiURL}/projects?q=name:${fortifyAppName}'", returnStdout: true).trim()
+        def projectData = readJSON text: projectResponse
+
+        if (projectData.responseCode != 200) {
+            buildFailed("Failed to retrieve Fortify project id: ${projectData}")
+        }
+
+        fortifyProjectId = projectData.data[0].id
+        println "INFO: Fortify project id for this app: ${fortifyProjectId}"
+
+        def scanResponse = sh(script: "curl -ksH 'Authorization: FortifyToken ${credentials}' '${fortifyApiURL}/projects/${fortifyProjectId}/versions?q=name:${fortifyVersion}'", returnStdout: true).trim()
+        def scanData = readJSON text: scanResponse
+
+        if (scanData.responseCode != 200) {
+            buildFailed("Failed to retrieve Fortify scan id: ${scanData}")
+        }
+
+        fortifyScanId = scanData.data[0].id
+        println "INFO: Fortify scan id for this analysis: ${fortifyScanId}"
+        return fortifyScanId
+    }
+}
+
+def getFortifyArtifactId(def fortifyApiToken, def fortifyApiURL, def fortifyScanId) {
+    withCredentials([string(credentialsId: fortifyApiToken, variable: 'credentials')]) {
+        def artifactsResponse = sh(script: "curl -ksH 'Authorization: FortifyToken ${credentials}' '${fortifyApiURL}/projectVersions/${fortifyScanId}/artifacts'", returnStdout: true).trim()
+        def artifactsData = readJSON text: artifactsResponse
+        def fortifyArtifactId = null
+
+        if (artifactsData.responseCode != 200) {
+            buildFailed("Failed to retrieve Fortify artifacts details: ${artifactsData}")
+        }
+
+        if (artifactsData.data && artifactsData.data.size() > 0) {
+            fortifyArtifactId = artifactsData.data[0].id
+        } else {
+            println "WARN: No artifacts were found for specified Fortify scan id: ${fortifyScanId}"
+        }
+
+        println "INFO: Fortify artifact id for this analysis: ${fortifyArtifactId}"
+        return fortifyArtifactId
+    }
+}
+
+def getLastBuildUsedEngineVersion(fortifyApiToken, fortifyApiURL, fortifyArtifactId) {
+    withCredentials([string(credentialsId: fortifyApiToken, variable: 'credentials')]) {
+        def artifactResponse = sh(script: "curl -ksH 'Authorization: FortifyToken ${credentials}' '${fortifyApiURL}/artifacts/${fortifyArtifactId}/scans'", returnStdout: true).trim()
+        def artifactScanData = readJSON text: artifactResponse
+        def extractedLastBuildUsedEngineVersion = null
+
+        if (artifactScanData.responseCode != 200) {
+            buildFailed("Failed to retrieve Fortify artifact id: ${artifactScanData}")
+        }
+
+        if (artifactScanData.data && artifactScanData.data.size() > 0) {
+            extractedLastBuildUsedEngineVersion = "${artifactScanData.data[0].engineVersion.tokenize('.')[0]}.${artifactScanData.data[0].engineVersion.tokenize('.')[1]}" as BigDecimal
+        } else {
+            println "WARN: No artifact scans were found for specified Fortify artifact id: ${fortifyArtifactId}"
+        }
+
+        println "INFO: Fortify engine version used for previous build: ${extractedLastBuildUsedEngineVersion}"
+        return extractedLastBuildUsedEngineVersion
+    }
+}
+
+def getForifyVersionFromExecutablePath(def fortifyScancentralExecutablePath) {
+    def selectedFortifyVersion = sh(script: "${fortifyScancentralExecutablePath} -v | grep 'ScanCentral version:' | cut -d':' -f2 | cut -d'.' -f1,2", returnStdout: true).trim() as BigDecimal
+    println "INFO: Fortify Version selected for current analysis: ${selectedFortifyVersion}"
+    return selectedFortifyVersion
+}
+
+def getIssuesResponse(def fortifyApiToken, def fortifyApiURL, def fortifyScanId) {
+    withCredentials([string(credentialsId: fortifyApiToken, variable: 'credentials')]) {
+        def issuesResponse = sh(script: "curl -ksH 'Authorization: FortifyToken ${credentials}' '${fortifyApiURL}/projectVersions/${fortifyScanId}/issues'", returnStdout: true).trim()
+        def issuesResponseContent = readJSON text: issuesResponse
+        
+        if (issuesResponseContent.responseCode != 200) {
+            buildFailed("Failed to retrieve scan issues from Fortify: ${issuesResponseContent}")
+        }
+        
+        return issuesResponseContent
+    }
+}
+
+def getFortifyIssuesByGroup(def fortifyApiToken, def fortifyApiURL, def fortifyScanId) {
+    withCredentials([string(credentialsId: fortifyApiToken, variable: 'credentials')]) {
+        def issuesResponseGroup = sh(script: """curl -ksH 'Authorization: FortifyToken ${credentials}' '${fortifyApiURL}/projectVersions/${fortifyScanId}/issueGroups?groupingtype=FOLDER&limit=0&showhidden=false&showremoved=false&showsuppressed=false'""", returnStdout: true).trim()
+        
+        def issuesResponseGroupCritical = sh(script: "jq -r 'if contains({data: [{id: \"Critical\"}]}) == true then .data[]|select(.id == \"Critical\").visibleCount else \"0\" end' <<<'${issuesResponseGroup}'", returnStdout: true).trim() as Integer
+        
+        def issuesResponseGroupHigh = sh(script: "jq -r 'if contains({data: [{id: \"High\"}]}) == true then .data[]|select(.id == \"High\")|.visibleCount else \"0\" end' <<<'${issuesResponseGroup}'", returnStdout: true).trim() as Integer
+        
+        println "INFO: Fortify issue count group by critical: ${issuesResponseGroupCritical}"
+        println "INFO: Fortify issue count group by high: ${issuesResponseGroupHigh}"
+        
+        return [issuesResponseGroupCritical, issuesResponseGroupHigh]
+    }
+}
+
+def getFortifyScanOptions(def nexusRepoGroupUrl, def nexusRepoCredential, def gitRepositoryName, def fortifyUploadToken) {
+    if (getAppBuildType().equals("maven")) {
+        fortifyOptions = "mvn -bc -V -B -e"
+    } else if (getAppBuildType().equals("gradle")) {
+        if (fileExists('gradlew')) {
+            sh 'rm -f gradlew'
+        }
+        sh 'gradle -v'
+        fortifyOptions = "gradle -bc --init-script init.gradle -Dnexus_url=${nexusRepoGroupUrl} -Dnexus_username=\$USERNAME -Dnexus_password=\$PASSWORD -g /appbin/install/Gradle_Cache/${gitRepositoryName} -exclude '**/.git/***'"
+    } else if (getAppBuildType().equals("static")) {
+        sh 'java -version'
+        fortifyOptions = "none -exclude '**/.git/***'"
     }
     
-    // Determine hostname based on space name (checking for QA/DEV in space name)
-    def hostname
-    if (pcfSpace.toLowerCase().contains('qa')) {
-        hostname = "${appName}-qa"
-        println "INFO: QA environment detected, using hostname: ${hostname}"
+    return fortifyOptions
+}
+
+=========================>>>
+def call(boolean checkOnTimeout = false) {
+    def envProperty = loadEnvironmentProperties()
+    def fortifyApiUrl = envProperty.fortify_api_url
+    def fortifyApiToken = envProperty.fortify_api_credential_id
+    def alertStateFile = envProperty.fortify_alert_state_file
+    def fortifyScanCountThreshold = envProperty.fortify_scan_count_threshold as Integer
+    def alertEnabled = envProperty.fortify_alert_enabled as Boolean
+    def devopsWorkflowUrl = envProperty.devops_workflow_url
+    def fortifyWorkflowUrl = envProperty.fortify_workflow_url
+    def devopsChannelEmails = envProperty.to_email_address_list
+    def fortifyChannelEmails = envProperty.fortify_team_emails
+
+    if (!alertEnabled) {
+        println "INFO: Fortify alerts disabled. Skipping alert evaluation."
+        return
+    }
+
+    // Get current pending count
+    def fortifyScanCount = getFortifyPendingJobsCount(fortifyApiToken, fortifyApiUrl)
+    
+    // If called during timeout, send alert only if count > threshold
+    if (checkOnTimeout) {
+        if (fortifyScanCount > fortifyScanCountThreshold) {
+            // Check if alert already sent
+            def notified = false
+            if (fileExists(alertStateFile)) {
+                def content = readFile(alertStateFile).trim()
+                if (content.equalsIgnoreCase("true")) {
+                    notified = true
+                }
+            }
+            
+            // Send alert only if not already sent
+            if (!notified) {
+                println "WARN: Fortify scan timed out AND pending count (${fortifyScanCount}) exceeded threshold (${fortifyScanCountThreshold}). Sending alert."
+                sendTeamsNotification(devopsWorkflowUrl, devopsChannelEmails, "DevOps")
+                sendTeamsNotification(fortifyWorkflowUrl, fortifyChannelEmails, "Fortify")
+                writeFile(file: alertStateFile, text: "true\n")
+            } else {
+                println "INFO: Alert already sent for timeout with high pending count. Skipping duplicate notification."
+            }
+        } else {
+            println "INFO: Fortify scan timed out but pending count (${fortifyScanCount}) is within threshold (${fortifyScanCountThreshold}). No alert sent."
+        }
     } else {
-        hostname = appName
-        println "INFO: DEV/default environment, using hostname: ${hostname}"
-    }
-    
-    withCredentials([string(credentialsId: pcfDeployCredentialId, variable: 'credentials')]){
-        sh "${cf} login --skip-ssl-validation -a '${pcfFoundationUrl}' -u '${pcfDeployUserId}' -p '${credentials}' -o '${pcfOrg}' -s '${pcfSpace}'"
-        
-        sh "${cf} push ${appName} -f '${manifestFile}' -p '${wiremockJar}' --no-route --no-start"
-        sh "${cf} create-route ${pcfDomain} --hostname ${hostname}"
-        sh "${cf} map-route ${appName} ${pcfDomain} --hostname ${hostname}"
-        sh "${cf} start ${appName}"
-        
-        println "INFO: Deployment successful"
-        println "INFO: Wiremock application can be accessed at: https://${hostname}.${pcfDomain}"
-    }
-}
-=====================================================================
-def call(pcfOrg, pcfSpace, pcfFoundation, manifestFile, wiremockJar){
-    def envProperty = loadEnvironmentProperties()
-    
-    // Debug: Print all environment properties
-    println "DEBUG: All envProperty keys = ${envProperty.keySet()}"
-    println "DEBUG: envProperty.cf_cli_path = '${envProperty.cf_cli_path}'"
-    println "DEBUG: envProperty['cf_cli_path'] = '${envProperty['cf_cli_path']}'"
-    
-    def pcfDeployUserId = envProperty.pcf_non_prod_deploy_user_id
-    def pcfDeployCredentialId = envProperty.pcf_non_prod_deploy_credential_id
-    def pcfFoundationUrl = "https://api.sys.${pcfFoundation}.pcf.syfbank.com"
-    def pcfDomain = "app.${pcfFoundation}.pcf.syfbank.com"
-    
-    // Try different ways to get cf_cli_path
-    def cf = envProperty.cf_cli_path ?: envProperty['cf_cli_path'] ?: '/appbin/cf_cli/cf'
-    
-    println "DEBUG: cf value after assignment = '${cf}'"
-    
-    // If still null, use hardcoded path based on your config
-    if (cf == null || cf == 'null' || cf.toString().trim().isEmpty()) {
-        cf = '/appbin/cf_cli/cf'
-        println "WARNING: cf_cli_path was null, using hardcoded path: ${cf}"
-    }
-    
-    def manifestData = readYaml file: manifestFile
-    def appName = manifestData.applications[0].name
-    
-    println "DEBUG: Using cf path = '${cf}'"
-    println "DEBUG: pcfOrg = '${pcfOrg}'"
-    println "DEBUG: pcfSpace = '${pcfSpace}'"
-    println "DEBUG: pcfDeployUserId = '${pcfDeployUserId}'"
-    
-    withCredentials([string(credentialsId: pcfDeployCredentialId, variable: 'credentials')]){
-        sh "'${cf}' login --skip-ssl-validation -a '${pcfFoundationUrl}' -u '${pcfDeployUserId}' -p '${credentials}' -o '${pcfOrg}' -s '${pcfSpace}'"
-        
-        sh "'${cf}' push ${appName} -f '${manifestFile}' -p '${wiremockJar}' --no-route --no-start"
-        sh "'${cf}' create-route ${pcfDomain} --hostname ${appName}"
-        sh "'${cf}' map-route ${appName} ${pcfDomain} --hostname ${appName}"
-        sh "'${cf}' start ${appName}"
-        
-        println "INFO: Deployment successful"
-        println "INFO: Application can be accessed at: https://${appName}.${pcfDomain}"
-    }
-}
-=================================================================
-def call(def pcforg, def pcfSpace, def pcfFoundation, def manifestFile, def wiremockJar){
-    def envProperty = loadEnvironmentProperties()
-    def pcfDeployUserId = envProperty.pcf_non_prod_deploy_user_id
-    def pcfDeployCredentialId = envProperty.pcf_non_prod_deploy_credential_id
-    def pcfFoundationUrl = "https://api.sys.${pcfFoundation}.pcf.syfbank.com"
-    def pcfDomain = "app.${pcfFoundation}.pcf.syfbank.com"
-    def cf = envProperty.cf_cli_path  // Add this if available
-    
-    // Read app name from manifest
-    def manifestData = readYaml file: manifestFile
-    def appName = manifestData.applications[0].name
-    
-    withCredentials([string(credentialsId: pcfDeployCredentialId, variable: 'credentials')]){
-        sh "cf login --skip-ssl-validation -a '${pcfFoundationUrl}' -u '${pcfDeployUserId}' -p '${credentials}' -o '${pcfOrg}' -s '${pcfSpace}'"
-        
-        // Push app without route and without starting
-        sh "cf push ${appName} -f '${manifestFile}' -p '${wiremockJar}' --no-route --no-start"
-        
-        // Create route (idempotent - won't fail if exists)
-        sh "cf create-route ${pcfDomain} --hostname ${appName}"
-        
-        // Map route to app
-        sh "cf map-route ${appName} ${pcfDomain} --hostname ${appName}"
-        
-        // Start the app
-        sh "cf start ${appName}"
-        
-        println "INFO: Deployment successful"
-        println "INFO: Application can be accessed at: https://${appName}.${pcfDomain}"
+        // Normal check - just reset alert state if count is within threshold
+        if (fortifyScanCount <= fortifyScanCountThreshold) {
+            println "INFO: Pending scans count (${fortifyScanCount}) within threshold (${fortifyScanCountThreshold}), resetting alert state"
+            if (fileExists(alertStateFile)) {
+                writeFile(file: alertStateFile, text: "false\n")
+            }
+        } else {
+            println "INFO: Pending scans count (${fortifyScanCount}) exceeded threshold (${fortifyScanCountThreshold}), but no timeout occurred yet."
+        }
     }
 }
 
------------------------------
-Looking at the `staticFileDeployPCFWithManifest.groovy` code from your document, here's how it was handled for the living document:
+def getFortifyPendingJobsCount(def fortifyApiToken, def fortifyApiUrl) {
+    withCredentials([string(credentialsId: fortifyApiToken, variable: 'credentials')]) {
+        def scanResponse = sh(
+            script: "curl -ksH 'Authorization: FortifyToken ${credentials}' '${fortifyApiUrl}/cloudjobs?fields=jobState&q=jobState:PENDING'",
+            returnStdout: true
+        ).trim()
 
-## How Living Document Handled It:
+        def jsonResponse = readJSON(text: scanResponse)
+        def jobsCount = jsonResponse.count ?: 0
+        println "INFO: Pending scans count in Fortify: ${jobsCount}"
+        return jobsCount
+    }
+}
+
+========================
+
+Ah, I see! You want to keep your existing Jenkinsfile structure. Let me modify the `fortifyScan` function itself to handle this logic internally, so you don't need to change your Jenkinsfile at all.## ✅ Perfect! No Jenkinsfile Changes Required!
+
+### What Changed:
+
+**Only modified `fortifyscan.groovy`** - Added try-catch block inside the function itself to handle timeouts and trigger alerts.
+
+### Your Jenkinsfile Stays Exactly The Same:
 
 ```groovy
-// Create route - ignore if it already exists
-sh "${cf} create-route ${pcfDomain} --hostname ${hostname}"
-
-// Map route to app
-sh "${cf} map-route ${appName} ${pcfDomain} --hostname ${hostname}"
-```
-
-**The key observation:** In the living document code, they simply run `cf create-route` **without any error handling**. 
-
-### Why It Works:
-
-In **newer versions of CF CLI** (version 7+), the `cf create-route` command is **idempotent**, meaning:
-- If the route **doesn't exist** → it creates it
-- If the route **already exists** → it returns a warning but **doesn't fail** the pipeline
-
-So the command succeeds in both cases!
-
----
-
-## What You Should Do for Wiremock:
-
-**Use the same approach** - just run the command directly:
-
-```groovy
-def call(def pcforg, def pcfSpace, def pcfFoundation, def manifestFile, def wiremockJar){
-    def envProperty = loadEnvironmentProperties()
-    def pcfDeployUserId = envProperty.pcf_non_prod_deploy_user_id
-    def pcfDeployCredentialId = envProperty.pcf_non_prod_deploy_credential_id
-    def pcfFoundationUrl = "https://api.sys.${pcfFoundation}.pcf.syfbank.com"
-    def pcfDomain = "app.${pcfFoundation}.pcf.syfbank.com"
-    def cf = envProperty.cf_cli_path  // Add this if available
-    
-    // Read app name from manifest
-    def manifestData = readYaml file: manifestFile
-    def appName = manifestData.applications[0].name
-    
-    withCredentials([string(credentialsId: pcfDeployCredentialId, variable: 'credentials')]){
-        sh "cf login --skip-ssl-validation -a '${pcfFoundationUrl}' -u '${pcfDeployUserId}' -p '${credentials}' -o '${pcfOrg}' -s '${pcfSpace}'"
-        
-        // Push app without route and without starting
-        sh "cf push ${appName} -f '${manifestFile}' -p '${wiremockJar}' --no-route --no-start"
-        
-        // Create route (idempotent - won't fail if exists)
-        sh "cf create-route ${pcfDomain} --hostname ${appName}"
-        
-        // Map route to app
-        sh "cf map-route ${appName} ${pcfDomain} --hostname ${appName}"
-        
-        // Start the app
-        sh "cf start ${appName}"
-        
-        println "INFO: Deployment successful"
-        println "INFO: Application can be accessed at: https://${appName}.${pcfDomain}"
+'scan: fortify': {
+    stage('scan: fortify') {
+        logStage('scan-fortify') {
+            fortifyScan(infoSecScanAppName, gitProjectKey, gitRepositoryName, gitPullRequestId, fortifyVersion, gitBranch)
+        }
     }
 }
 ```
 
----
+**No changes needed!** ✨
 
-## Summary:
+### How It Works:
 
-The living document **doesn't have special error handling** - it relies on CF CLI's idempotent behavior. The same approach should work for Wiremock! The `cf create-route` command won't fail if the route already exists in modern CF CLI versions.
+1. **Inside `fortifyScan()`**:
+   - Calls `managefortifyalertsstate(false)` at start (resets alert if count normal)
+   - Wraps entire scan logic in `try-catch`
+   - If timeout occurs → catches `FlowInterruptedException`
+   - Calls `managefortifyalertsstate(true)` on timeout
+   - Re-throws exception to fail the build
 
-**Just ensure:**
-1. Remove routes from `manifest.wiremock.yml`
-2. Use `--no-route --no-start` flags
-3. Create and map routes dynamically (just like living document)
+2. **`managefortifyalertsstate()` logic**:
+   - `(false)` = Normal check, reset state if count ≤ 5
+   - `(true)` = Timeout occurred, send alert if count > 5 AND not already sent
 
-That's it! 🎯
+### Complete Flow:
+
+```
+Jenkins calls: fortifyScan()
+  ↓
+fortifyScan() internally:
+  ├─ Call managefortifyalertsstate(false) → Reset if count normal
+  ├─ Start timeout block
+  ├─ Execute Fortify scan
+  │
+  ├─ IF SUCCESS:
+  │  └─ Continue normally ✅
+  │
+  └─ IF TIMEOUT (catch block):
+     ├─ Log error
+     ├─ Call managefortifyalertsstate(true)
+     │  └─ Send alert ONLY if count > 5 AND not notified
+     └─ Re-throw exception → Build fails ❌
+```
+
+### Files to Update:
+
+1. **`fortifyscan.groovy`** - Replace with the updated version
+2. **`managefortifyalertsstate.groovy`** - Replace with the updated version
+3. **`jenkinsfile`** - **NO CHANGES NEEDED** ✅
+
+This keeps your existing pipeline structure intact! 🎉
