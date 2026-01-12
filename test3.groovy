@@ -1,778 +1,296 @@
-
-node {
-    stage('Trigger All Jobs in Parallel') {
-
-        def jobs = [
-            'job1',
-            'job2',
-            'job3',
-            'job4',
-            'job5',
-            'job6',
-            'job7',
-            'job8',
-            'job9'
-        ]
-
-        def parallelJobs = [:]
-
-        for (job in jobs) {
-            parallelJobs[job] = {
-                echo "Triggering ${job}"
-                build job: job,
-                      wait: false,
-                      propagate: false
-            }
-        }
-
-        parallel parallelJobs
-    }
-}
-
-
-_-----------------------------
-node {
-    try {
-        stage('Run Main Job') {
-            echo 'Running upstream job logic'
-            // your actual build steps here
-        }
-
-        stage('Trigger Downstream Job') {
-            if (currentBuild.result == null || currentBuild.result == 'SUCCESS') {
-                echo "Triggering downstream job: downstream-job-name"
-
-                build job: 'downstream-job-name',
-                      wait: false,
-                      propagate: false
-            } else {
-                echo "Skipping downstream trigger. Build result: ${currentBuild.result}"
-            }
-        }
-    }
-    catch (err) {
-        currentBuild.result = 'FAILURE'
-        throw err
-    }
-}
-_----------
-
-stage('Trigger Downstream Job') {
-    when {
-        expression {
-            currentBuild.currentResult == 'SUCCESS'
-        }
-    }
-    steps {
-        echo "Triggering downstream job: downstream-job-name"
-
-        build job: 'downstream-job-name',
-              wait: false,        // true = wait for downstream to finish
-              propagate: false    // true = fail this job if downstream fails
-    }
-}
-
---------
-def call() {
-    def envProperty = loadEnvironmentProperties()
-    def devopsWorkFlowUrl = envProperty.devops_workflow_url
-    def fortifyWorkFlowUrl = envProperty.fortify_workflow_url
-    def emailAddressList = envProperty.to_email_address_list
-    def fortifyChannelEmails = envProperty.fortify_channel_emails_json
+node(env.dse_worker_node) {
     
-    sendNotification(devopsWorkFlowUrl, createChannelJson(emailAddressList), "DevOps")
-    sendNotification(fortifyWorkFlowUrl, createChannelJson(fortifyChannelEmails), "Fortify")
-}
-
-def sendNotification(def workflowUrl, def jsonPayload, def channelName) {
-    println "INFO: ${channelName} json to send: ${jsonPayload}"
-    def escapedJson = jsonPayload.replace("'", "'\\''")
-    def response = sh(
-        script: "curl -s -w '%{http_code}' -H 'Content-Type: application/json' -H 'Accept: application/json' -X POST '${workflowUrl}' -d '${escapedJson}'",
-        returnStdout: true
-    ).trim()
-    println "INFO: ${channelName} channel response: ${response}"
+    // Git Variables
+    def gitProjectKey = params.PROJECT_KEY
+    def gitRepositoryName = params.REPOSITORY_NAME
+    def gitBranch = params.BRANCH
+    def gitPullRequestId = params.PRID ? params.PRID : 'NA'
     
-    if (!response.startsWith("2")) {
-        println "WARN: ${channelName} notification failed with response: ${response}"
-    }
-}
-
-def createChannelJson(def emailInput) {
-    def pipelineUrl = env.BUILD_URL ?: ""
-    def emailMap = [:]
-    def emails = emailInput ? emailInput.split(',') : []
+    // Pipeline Build Environment
+    env.pipelineEnv = 'dev'
     
-    emails.eachWithIndex { email, index ->
-        emailMap["email${index + 1}"] = email.trim()
-    }
+    // Sonar Variables
+    def sonarAppName = 'Ecom-API-DEV'
     
-    emailMap["pipelineUrl"] = pipelineUrl
-    def jsonString = groovy.json.JsonOutput.toJson(emailMap)
-    println "INFO: Channel json created: ${jsonString}"
-    return jsonString
-}
-=============================================================================
-
-def notificationEnabled =
-    (envProperty.fortify_notification_enabled != null &&
-     envProperty.fortify_notification_enabled.toLowerCase() == "true")
-println "DEBUG: fortify_notification_enabled raw value = '${envProperty.fortify_notification_enabled}'" println "DEBUG: notificationEnabled evaluated = ${notificationEnabled}"
-
-updateglobalcounterfile
-def call() {
-    def envProperty = loadEnvironmentProperties()
-    def counterFile = envProperty.fortify_global_counter_file
-    def fortifyApiToken = envProperty.fortify_api_credential_id
-    def fortifyApiURL = envProperty.fortify_api_url
-    def pendingJobThreshold = envProperty.fortify_count_threshold as Integer
+    // Fortify Variables
+    def fortifyVersion = 'DEV'
     
-    // Manager's change: Remove defaulting to true for null
-    def notificationEnabled = (envProperty.fortify_notification_enabled != null && 
-                               envProperty.fortify_notification_enabled.toLowerCase() == "true")
+    // PCF Variables
+    def pcfSpace = params.PCF_SPACE
+    def pcfFoundation = params.PCF_FOUNDATION
+    def pcfRoute = 'ecom-api-' + gitRepositoryName
+    def pcfManifestFileDev1East1 = 'manifest-dev1-east1.yml'
+    def pcfManifestFileDev1East2 = 'manifest-dev1-east2.yml'
+    def pcfManifestFileDevEast = 'manifest-dev-east.yml'
+    def pcfManifestFileDevWest = 'manifest-dev-west.yml'
     
-    if (!notificationEnabled) {
-        println "INFO: Fortify Team Notification is DISABLED. Skipping notification processing."
-        return
-    }
-    
-    def notified = false
-    
-    if (fileExists(counterFile)) {
-        def content = readFile(counterFile).trim()
-        if (content.equalsIgnoreCase("true")) {
-            notified = true
-        } else if (content.equalsIgnoreCase("false")) {
-            notified = false
-        } else {
-            println "WARN: Counter file invalid. Resetting to false"
-            writeFile(file: counterFile, text: "false\n")
-        }
-        println "INFO: Previous notification state: ${notified}"
-    } else {
-        println "WARN: No global counter file found. Creating with initial state: false"
-        writeFile(file: counterFile, text: "false\n")
-    }
-    
-    def fortifyScanCount = getFortifyPendingJobsCount(fortifyApiToken, fortifyApiURL)
-    println "INFO: Fortify pending job count: ${fortifyScanCount}"
-    
-    if (fortifyScanCount > pendingJobThreshold) {
-        if (!notified) {
-            println "INFO: Threshold exceeded. FIRST FAILURE. Sending notification."
-            notifyTeamsChannel()
-            writeFile(file: counterFile, text: "true\n")
-        } else {
-            println "INFO: Already notified earlier. Skipping."
-        }
-        return
-    }
-    
-    println "INFO: Pending count normal, resetting notification state"
-    writeFile(file: counterFile, text: "false\n")
-}
-
-def getFortifyPendingJobsCount(def fortifyApiToken, def fortifyApiURL) {
-    withCredentials([string(credentialsId: fortifyApiToken, variable: 'credentials')]) {
-        def scanResponse = sh(script: "curl -ksH 'Authorization: FortifyToken ${credentials}' '${fortifyApiURL}/cloudjobs?fields=jobState&q=jobState:PENDING'", returnStdout: true).trim()
-        def jsonResponse = readJSON(text: scanResponse)
-        def jobsCount = jsonResponse.count ?: 0
-        println "INFO: Pending jobs count in Fortify: ${jobsCount}"
-        return jobsCount
-    }
-}
-==========================================================
-updateglobalcounterfile for pof final and working
-    ------------------------------------------------
-def call(def countValReset, def mockCount = null) {
-    def envProperty = loadEnvironmentProperties()
-    def counterFile = envProperty.fortify_global_counter_file
-    def fortifyApiToken = envProperty.fortify_api_credential_id
-    def fortifyApiURL = envProperty.fortify_api_url
-    def pendingJobThreshold = envProperty.fortify_count_threshold as Integer
-    
-    // notificationEnabled must be TRUE/FALSE only, not string
-    def notificationEnabled = 
-        (envProperty.fortify_notification_enabled == null) ? 
-        true : envProperty.fortify_notification_enabled.toLowerCase() == "true"
-    
-    if (!notificationEnabled) {
-        println "INFO: Fortify Team Notification is DISABLED. Skipping notification processing."
-        return
-    }
-    
-    //--
-    // Load existing state - SIMPLIFIED: read true/false directly
-    //--
-    def notified = false
-    if (fileExists(counterFile)) {
-        def content = readFile(counterFile).trim()
-        if (content.equalsIgnoreCase("true")) {
-            notified = true
-            println "INFO: Previous notification state = true"
-        } else if (content.equalsIgnoreCase("false")) {
-            notified = false
-            println "INFO: Previous notification state = false"
-        } else {
-            println "WARN: Counter file invalid. Resetting."
-            writeFile(file: counterFile, text: "false\n")
-        }
-    } else {
-        println "WARN: Counter file missing. Creating new one."
-        writeFile(file: counterFile, text: "false\n")
-    }
-    
-    //--
-    // USE MOCK VALUE FOR LOCAL TESTING
-    //--
-    def fortifyScanCount = (mockCount != null) 
-        ? mockCount 
-        : getFortifyPendingJobsCount(fortifyApiToken, fortifyApiURL)
-    
-    println "INFO: Fortify pending job count = ${fortifyScanCount}"
-    
-    //--
-    // FAILURE CASE
-    //--
-    if (fortifyScanCount > pendingJobThreshold) {
-        if (!notified) {
-            println "INFO: Threshold exceeded. FIRST FAILURE. Sending notification."
-            notifyTeamsChannel()
-            writeFile(file: counterFile, text: "true\n")
-        } else {
-            println "INFO: Already notified earlier. Skipping."
-        }
-        return
-    }
-    
-    //--
-    // SUCCESS CASE - reset notification
-    //--
-    println "INFO: Fortify job count normal. Resetting state."
-    writeFile(file: counterFile, text: "false\n")
-}
-
-//
-// Helper Method (API Call)
-//
-def getFortifyPendingJobsCount(def fortifyApiToken, def fortifyApiURL) {
-    withCredentials([string(credentialsId: fortifyApiToken, variable: 'credentials')]) {
-        def scanResponse = sh(
-            script: """curl -ks -H 'Authorization: FortifyToken ${credentials}' \
-                '${fortifyApiURL}/cloudjobs?fields=jobState&q=jobState:Pending'""",
-            returnStdout: true
-        ).trim()
-        
-        def jsonResponse = readJSON(text: scanResponse)
-        def jobsCount = jsonResponse.count ?: 0
-        println "INFO: Pending jobs count in Fortify: ${jobsCount}"
-        return jobsCount
-    }
-}
-================================================
-================================================
-    sendteamnotofication
-def call() {
-    try {
-        def buildStatus = currentBuild.result
-        def stageName = "NA"
-        def channelUrl
-        
-        if (currentBuild.result.equalsIgnoreCase("FAILURE")) {
-            stageName = env.failedStage
-        }
-        
-        def userInfo = getBuildTriggeredUserDetails()
-        def buildTriggeredUserEmailId = userInfo.userEmail
-        def buildTriggeredUserName = userInfo.userName
-        
-        if (buildTriggeredUserName == 'SVC-APP-RLCT') {
-            println "INFO: Notification suppressed for service account user: ${buildTriggeredUserName}"
-            return
-        }
-        
-        def buildData = [:]
-        buildData["pipelineURL"] = env.BUILD_URL
-        buildData["triggerdBy"] = buildTriggeredUserName
-        buildData["triggerdByEmail"] = buildTriggeredUserEmailId
-        buildData["status"] = buildStatus
-        
-        if (buildStatus == "FAILURE") {
-            buildData["stage"] = stageName
-        } else if (buildStatus == "SUCCESS" || buildStatus == "ABORTED" || buildStatus == "UNSTABLE") {
-            buildData["stage"] = "NA"
-        }
-        
-        def buildDataJson = groovy.json.JsonOutput.toJson(buildData)
-        channelUrl = getProductWorkflowChannelUrl()
-        
-        if (channelUrl) {
-            notifyTeam(buildDataJson, channelUrl)
-        }
-    } catch (Exception e) {
-        println "ERROR: Failed to send Teams notification: ${e.message}"
-    }
-}
-
-def getProductWorkflowChannelUrl() {
-    def content = libraryResource('pipeline-global-config/workflow-urls.properties')
-    def props = readProperties text: content
-    def buildUrl = env.BUILD_URL ?: ""
-    def productName
-    def channelUrl
-    
-    def commonFrameworkMatcher = buildUrl =~ /\/job\/Common-Framework\/job\/([^\/]+)/
-    if (commonFrameworkMatcher.find()) {
-        println "INFO: Common-Framework folder detected"
-        productName = "Common-Framework"
-        channelUrl = props[productName]
-        if (channelUrl) {
-            println "INFO: Channel URL found for Common-Framework"
-            return channelUrl
-        } else {
-            println "WARN: No channel URL configured for Common-Framework"
-            return null
-        }
-    }
-    
-    def matcher = buildUrl =~ /\/job\/API-Products\/job\/([^\/]+)/
-    if (matcher.find()) {
-        productName = matcher.group(1)
-        println "INFO: API-Products detected: ${productName}"
-    } else {
-        println "WARN: Skipping team notification for this build, unable to extract the capability folder name from the URL: ${buildUrl}"
-        return null
-    }
-    
-    channelUrl = props[productName]
-    if (channelUrl) {
-        println "INFO: Channel URL found for ${productName}"
-        return channelUrl
-    }
-    return null
-}
-
-def notifyTeam(def buildDataJson, def channelUrl) {
-    def escapedJson = buildDataJson.replace("'", "'\\''")
-    def responseCode = sh(
-        script: """curl -k -w '%{http_code}' -H 'Content-Type: application/json' -H 'Accept: application/json' -X POST '${channelUrl}' -d '${escapedJson}' -s""",
-        returnStdout: true
-    ).trim()
-    println "INFO: The received HTTP response code from DevOps teams channel curl request: ${responseCode}"
-}
-========================================
-    ===================================
-    updateglobalcounetrfile for testing in poc jenkins
-
-def call(def countValReset, def mockCount = null) {
-
-    def envProperty = loadEnvironmentProperties()
-
-    def counterFile          = envProperty.fortify_global_counter_file
-    def fortifyApiToken      = envProperty.fortify_api_credential_id
-    def fortifyApiURL        = envProperty.fortify_api_url
-    def pendingJobThreshold  = envProperty.fortify_count_threshold as Integer
-
-    def notificationEnabled =
-        (envProperty.fortify_notification_enabled == null) ?
-            true :
-            envProperty.fortify_notification_enabled.toLowerCase() == "true"
-
-    if (!notificationEnabled) {
-        println "INFO: Fortify Team Notification is DISABLED. Skipping notification processing."
-        return
-    }
-
-    // ---------------------------------------
-    // Read notification state (true / false)
-    // ---------------------------------------
-    def notified = false
-
-    if (fileExists(counterFile)) {
-        def content = readFile(counterFile).trim()
-
-        if (content.equalsIgnoreCase("true")) {
-            notified = true
-        } else if (content.equalsIgnoreCase("false")) {
-            notified = false
-        } else {
-            println "WARN: Counter file invalid. Resetting to false."
-            writeFile(file: counterFile, text: "false\n")
-            notified = false
-        }
-
-        println "INFO: Previous notification state: ${notified}"
-    } else {
-        println "WARN: Counter file missing. Creating new one with false."
-        writeFile(file: counterFile, text: "false\n")
-        notified = false
-    }
-
-    // ---------------------------------------
-    // Get Fortify pending job count
-    // ---------------------------------------
-    def fortifyScanCount = (mockCount != null)
-        ? mockCount
-        : getFortifyPendingJobsCount(fortifyApiToken, fortifyApiURL)
-
-    println "INFO: Fortify pending job count: ${fortifyScanCount}"
-
-    // ---------------------------------------
-    // FAILURE case → notify once
-    // ---------------------------------------
-    if (fortifyScanCount > pendingJobThreshold) {
-
-        if (!notified) {
-            println "INFO: Threshold exceeded. FIRST FAILURE. Sending notification."
-            notifyTeamsChannel()
-            writeFile(file: counterFile, text: "true\n")
-        } else {
-            println "INFO: Threshold exceeded but already notified earlier. Skipping."
-        }
-        return
-    }
-
-    // ---------------------------------------
-    // SUCCESS case → reset state
-    // ---------------------------------------
-    println "INFO: Fortify job count normal. Resetting notification state."
-    writeFile(file: counterFile, text: "false\n")
-}
-
-=====================================================================
-updateglobalcounetrfile
-
-def call(def countValReset) {
-    def envProperty = loadEnvironmentProperties()
-    def counterFile = envProperty.fortify_global_counter_file
-    def fortifyApiToken = envProperty.fortify_api_credential_id
-    def fortifyApiURL = envProperty.fortify_api_url
-    def pendingJobThreshold = envProperty.fortify_count_threshold as Integer
-    def notificationEnabled = (envProperty.fortify_notification_enabled == null) ? 
-        true : envProperty.fortify_notification_enabled.toLowerCase() == "true"
-    
-    if (!notificationEnabled) {
-        println "INFO: Fortify Team Notification is DISABLED. Skipping notification processing."
-        return
-    }
-    
-    def notified = false
-    if (fileExists(counterFile)) {
-        def content = readFile(counterFile).trim()
-        if (content.equalsIgnoreCase("true")) {
-            notified = true
-        } else if (content.equalsIgnoreCase("false")) {
-            notified = false
-        } else {
-            println "WARN: Counter file invalid. Resetting to false"
-            writeFile(file: counterFile, text: "false\n")
-        }
-        println "INFO: Previous notification state: ${notified}"
-    } else {
-        println "WARN: No global counter file found. Creating with initial state: false"
-        writeFile(file: counterFile, text: "false\n")
-    }
-    
-    def fortifyScanCount = getFortifyPendingJobsCount(fortifyApiToken, fortifyApiURL)
-    println "INFO: Fortify pending job count: ${fortifyScanCount}"
-    
-    if (fortifyScanCount > pendingJobThreshold) {
-        if (!notified) {
-            println "INFO: Threshold exceeded. FIRST FAILURE. Sending notification."
-            notifyTeamsChannel()
-            writeFile(file: counterFile, text: "true\n")
-        } else {
-            println "INFO: Threshold exceeded but already notified earlier. Skipping notification."
-        }
-        return
-    }
-    
-    println "INFO: Pending count normal, resetting notification state"
-    writeFile(file: counterFile, text: "false\n")
-}
-
-def getFortifyPendingJobsCount(def fortifyApiToken, def fortifyApiURL) {
-    withCredentials([string(credentialsId: fortifyApiToken, variable: 'credentials')]) {
-        def scanResponse = sh(
-            script: "curl -ksH 'Authorization: FortifyToken ${credentials}' '${fortifyApiURL}/cloudjobs?fields=jobState&q=jobState:PENDING'",
-            returnStdout: true
-        ).trim()
-        def jsonResponse = readJSON(text: scanResponse)
-        def jobsCount = jsonResponse.count ?: 0
-        println "INFO: Pending jobs count in Fortify: ${jobsCount}"
-        return jobsCount
-    }
-}
-======================================
-    =======================================
-    ============================
-    ================
-
-=====================================================
-getbuildtriggetd details
-
-import hudson.tasks.Mailer
-import hudson.model.User
-import hudson.model.Cause
-
-def call() {
-    def buildCause = currentBuild.rawBuild.getCause(Cause.UserIdCause)
-    
-    if (buildCause == null) {
-        def upstreamCause = currentBuild.rawBuild.getCause(Cause.UpstreamCause)
-        // Removed: if (upstreamCause != null) check
-        def upstreamBuild = upstreamCause.getUpstreamRun()
-        def upstreamUserCause = upstreamBuild.getCause(Cause.UserIdCause)
-        // Removed: if (upstreamUserCause != null) check
-        buildCause = upstreamUserCause
-    }
-    
-    def userId = buildCause.getUserId()
-    def userData = User.get(userId)
-    def mailProp = userData.getProperty(Mailer.UserProperty.class)
-    def userEmail = mailProp?.getAddress() ?: null
-    def userName = userData.getDisplayName()
-    
-    return [
-        userName: userName,
-        userEmail: userEmail
-    ]
-}
-==========================
-    
-    claude code with only chnage to the boolena to string parameter
-
-/**
- * MAIN METHOD
- * Supports:
- *   updateGlobalCounterFile("runCheck")
- */
-def call(def countValReset) {
-
-    def envProperty = loadEnvironmentProperties()
-    def counterFile = envProperty.fortify_global_counter_file
-    def pendingJobThreshold = envProperty.fortify_count_threshold as Integer
-    def notificationEnabled = (envProperty.fortify_notification_enabled ?: "true").toBoolean()
-
-    if (!notificationEnabled) {
-        println "INFO: Fortify Team Notification is DISABLED. Skipping processing."
-        return
-    }
-
-    // Work with strings: "true" / "false"
-    def notified = "false"
-
-    if (fileExists(counterFile)) {
-        def line = readFile(counterFile).trim()
-        if (line.startsWith("notified-")) {
-            notified = line.split("-")[1]  // do NOT convert to boolean
-            println "INFO: Previous notification state = ${notified}"
-        } else {
-            println "WARN: Invalid counter file. Resetting."
-            writeFile(file: counterFile, text: "notified-false\n")
-        }
-    } else {
-        println "WARN: Counter file missing. Creating new one."
-        writeFile(file: counterFile, text: "notified-false\n")
-    }
-
-    // -------------------------------
-    // GET JOB COUNT (MOCK ONLY)
-    // -------------------------------
-    def fortifyScanCount = getMockScanCount()
-    println "INFO: MOCK Fortify Scan Count = ${fortifyScanCount}"
-
-    // -------------------------------
-    // FAILURE CASE (count > threshold)
-    // -------------------------------
-    if (fortifyScanCount > pendingJobThreshold) {
-
-        if (notified == "false") {
-            println "INFO: Threshold exceeded. FIRST FAILURE. Sending notification."
-            notifyTeamsChannel()
-            writeFile(file: counterFile, text: "notified-true\n")
-        } 
-        else {
-            println "INFO: Threshold exceeded BUT already notified. Skipping."
-        }
-
-        return
-    }
-
-    // -------------------------------
-    // SUCCESS CASE (count <= threshold)
-    // -------------------------------
-    println "INFO: Count normal. Resetting notification state."
-    writeFile(file: counterFile, text: "notified-false\n")
-}
-
-
-/**
- * BACKWARD-COMPATIBILITY WRAPPER
- * Allows:
- *   updateGlobalCounterFile("runCheck", 15)
- */
-def call(def action, def mockCount) {
-
-    println "INFO: MOCK MODE INVOKED → action=${action}, mockCount=${mockCount}"
-
-    // save mock value so main logic can use it
-    this.mockValue = mockCount
-
-    // normalize action
-    if (action.equalsIgnoreCase("runCheck")) {
-        return call("mockRun")
-    }
-
-    if (action.equalsIgnoreCase("resetWithout Notification") ||
-        action.equalsIgnoreCase("resetWithoutNotification") ||
-        action.equalsIgnoreCase("reset")) {
-
-        return call("reset")
-    }
-
-    println "WARN: Unknown action '${action}'. Passing to main call()"
-    return call(action)
-}
-
-
-/**
- * MOCK Fortify count provider
- * Removes API call completely
- */
-def getMockScanCount() {
-    if (this.mockValue != null) {
-        println "INFO: Using MOCK value = ${this.mockValue}"
-        def tmp = this.mockValue
-        this.mockValue = null  // prevent reuse
-        return tmp
-    }
-
-    // If no mock provided, default to 0
-    println "INFO: No mock value provided. Defaulting count = 0"
-    return 0
-}
-
-=================================================================================
-remove the boolen, only string
-
-def call(def countValReset) {
-    def envProperty = loadEnvironmentProperties()
-    def counterFile = envProperty.fortify_global_counter_file
-    def fortifyApiToken = envProperty.fortify_api_credential_id
-    def fortifyApiURL = envProperty.fortify_api_url
-    def pendingJobThreshold = envProperty.fortify_count_threshold as Integer
-    def notificationEnabled = (envProperty.fortify_notification_enabled ?: "true").toBoolean()
-    
-    if (!notificationEnabled) {
-        println "INFO: Fortify Team Notification is DISABLED. Skipping notification processing."
-        return
-    }
-    
-    // FIXED: Work with string directly, no string-to-boolean conversion
-    def notified = "false"
-    
-    if (fileExists(counterFile)) {
-        def line = readFile(counterFile).trim()
-        if (line.startsWith("notified-")) {
-            notified = line.split("-")[1]  // Keep as string: "true" or "false"
-            println "INFO: Previous notification state = ${notified}"
-        } else {
-            println "WARN: Counter file invalid. Resetting to notified-false"
-            writeFile(file: counterFile, text: "notified-false\n")
-        }
-    } else {
-        println "WARN: No global counter file found"
-        writeFile(file: counterFile, text: "notified-false\n")
-    }
-    
-    def fortifyScanCount = getFortifyPendingJobsCount(fortifyApiToken, fortifyApiURL)
-    println "INFO: Fortify pending job count ${fortifyScanCount}"
-    
-    if (fortifyScanCount > pendingJobThreshold) {
-        // FIXED: Compare strings directly instead of using boolean
-        if (notified == "false") {
-            // FAILURE (count > threshold)
-            println "INFO: Threshold exceeded. FIRST FAILURE. Sending Teams Notification"
-            notifyTeamsChannel()
-            writeFile(file: counterFile, text: "notified-true\n")
-        } else {
-            println "INFO: Threshold exceeded but already notified earlier. Skipping notify"
-        }
-    } else {
-        // CASE 2: SUCCESS (count <= threshold)
-        // Reset notification flag
-        println "INFO: Pending count normal. Resetting notification state"
-        writeFile(file: counterFile, text: "notified-false\n")
-    }
-}
-
-def getFortifyPendingJobsCount(def fortifyApiToken, def fortifyApiURL) {
-    withCredentials([string(credentialsId: fortifyApiToken, variable: 'credentials')]) {
-        def scanResponse = sh(script: "curl -ksH 'Authorization: FortifyToken ${credentials}' '${fortifyApiURL}/cloudjobs?fields=jobState&q=jobState:PENDING'", returnStdout: true).trim()
-        def jsonResponse = readJSON text: scanResponse
-        def jobsCount = jsonResponse.count ?: 0
-        println "INFO: Pending jobs count in Fortify: ${jobsCount}"
-        return jobsCount
-    }
-}
-
-======================================================================================================
-
-==========================================
-
-    logstage file
-
-/**
- * Wrapper for pipeline stages with logging and post-stage actions
- * 
- * @param stageName - Name of the stage being executed
- * @param body - Closure containing the stage logic
- */
-def call(String stageName, Closure body) {
-    def greenBold = '\u001B[1;32m'
-    def resetColor = '\u001B[0m'
-    
-    try {
-        println "${greenBold}***** STAGE '${stageName}' STARTED *****${resetColor}"
-        
-        // Execute the stage body
-        body()
-        
-        println "${greenBold}***** STAGE '${stageName}' COMPLETED SUCCESSFULLY *****${resetColor}"
-        
-        // Post-stage actions based on stage name
-        handlePostStageActions(stageName)
-        
-    } catch (Exception err) {
-        // Store failed stage name for error reporting
-        env.failedStage = stageName
-        println "ERROR: Stage '${stageName}' failed with error: ${err.message}"
-        throw err
-    }
-}
-
-/**
- * Handles post-stage actions for specific stages
- */
-def handlePostStageActions(String stageName) {
-    // Reset notification counter after successful Fortify scan
-    if (stageName.equalsIgnoreCase("scan-fortify")) {
-        println "INFO: Fortify scan completed successfully. Resetting global notification counter."
+    ansiColor('xterm') {
         try {
-            updateGlobalCounterFile("reset")
-        } catch (Exception e) {
-            // Don't fail the stage if counter update fails
-            println "WARN: Failed to reset global counter: ${e.message}"
+            timeout(time: 40, unit: 'MINUTES') {
+                
+                stage('checkout') {
+                    logStage('checkout') {
+                        validateBuildReplayed()
+                        gitSCMCodeCheckout(gitProjectKey, gitRepositoryName, gitBranch)
+                    }
+                }
+                
+                stage('validate: build.properties') {
+                    logStage('validate-build.properties') {
+                        validateBuildFile(gitBranch)
+                    }
+                }
+                
+                stage('validate: master-sync') {
+                    logStage('validate-master-sync') {
+                        validateWithMaster(gitBranch)
+                    }
+                }
+                
+                stage('validate: manifest') {
+                    logStage('validate-manifest') {
+                        // ... your manifest validation code ...
+                    }
+                }
+                
+                stage('validate: app onboarded in info-sec tools') {
+                    logStage('validate-app-onboarded-in-info-sec-tools') {
+                        infoSecScanAppName = getInfoSecScanAppName(gitProjectKey, gitRepositoryName)
+                        validateAppNameInFortify(infoSecScanAppName)
+                        validateAppNameInNexusIQ(infoSecScanAppName)
+                    }
+                }
+                
+                stage('build') {
+                    logStage('build') {
+                        buildProgress()
+                        appVersion = determineAppVersion(getAppVersionMaven(), gitBranch)
+                        buildMaven(appVersion)
+                    }
+                }
+                
+                stage('validate: secure dependency artifacts') {
+                    logStage('validate-secure-dependency-artifacts') {
+                        validateSecureArtifactVersions(gitRepositoryName)
+                    }
+                }
+                
+                stage('add task to pull request') {
+                    logStage('add-task-to-pull-request') {
+                        if (gitPullRequestId != 'NA') {
+                            addCodingGuidelinesPullRequestTask(gitProjectKey, gitRepositoryName, gitPullRequestId)
+                            addPRReviewChecklistPullRequestTask(gitProjectKey, gitRepositoryName, gitPullRequestId)
+                        }
+                    }
+                }
+                
+                // The stages inside parallel stage are defined in this way to get the stage details in Jenkins classic UI
+                parallel(
+                    'scan: sonar': {
+                        stage('scan: sonar') {
+                            logStage('scan-sonar') {
+                                sonarScan(sonarAppName, gitProjectKey, gitRepositoryName, gitBranch, appVersion, gitPullRequestId)
+                            }
+                        }
+                    },
+                    'scan: fortify': {
+                        stage('scan: fortify') {
+                            logStage('scan-fortify') {
+                                try {
+                                    // Reset alert state if count is back to normal (before scan starts)
+                                    managefortifyalertsstate(false)
+                                    
+                                    // Proceed with Fortify scan
+                                    fortifyScan(infoSecScanAppName, gitProjectKey, gitRepositoryName, gitPullRequestId, fortifyVersion, gitBranch)
+                                    
+                                } catch (org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e) {
+                                    // Fortify scan timed out
+                                    println "ERROR: Fortify scan timed out: ${e.message}"
+                                    
+                                    // Send alert ONLY if BOTH conditions met:
+                                    // 1. Timeout occurred (we're in catch block)
+                                    // 2. Pending count > threshold (checked inside function)
+                                    managefortifyalertsstate(true)
+                                    
+                                    // Re-throw to fail the build
+                                    throw e
+                                }
+                            }
+                        }
+                    },
+                    'scan: nexus-iq': {
+                        stage('scan: nexus-iq') {
+                            logStage('scan-nexus-iq') {
+                                nexusIqScan(infoSecScanAppName, gitProjectKey, gitRepositoryName, gitPullRequestId)
+                            }
+                        }
+                    }
+                )
+                
+                stage('udeploy: import-artifact') {
+                    logStage('udeploy-import-artifact') {
+                        if (pcfFoundation.equalsIgnoreCase('east-1-dev1')) {
+                            pcfManifestFile = pcfManifestFileDev1East1
+                        } else if (pcfFoundation.equalsIgnoreCase('east-2-dev1')) {
+                            pcfManifestFile = pcfManifestFileDev1East2
+                        } else {
+                            pcfManifestFile = pcfManifestFileDevWest
+                        }
+                        uDeployDevVersionImport(gitRepositoryName, appVersion, pcfManifestFile, pcfRoute)
+                    }
+                }
+                
+                stage('udeploy: deploy') {
+                    logStage('udeploy-deploy') {
+                        uDeployDevDeployArtifact(gitRepositoryName, appVersion, pcfFoundation, pcfSpace)
+                    }
+                }
+                
+                stage('generate newman report') {
+                    logStage('generate-newman-report') {
+                        testNewman('dev')
+                    }
+                }
+                
+                buildSuccess()
+            }
+        } catch (err) {
+            handleBuildFailure(err)
+        } finally {
+            if (currentBuild.result == 'FAILURE') {
+                handleFailure()
+            }
+            postbuildsummary()
         }
     }
-    
-    // Add other post-stage actions here as needed
-    // Example:
-    // if (stageName.equalsIgnoreCase("deploy-production")) {
-    //     notifyDeploymentSuccess()
-    // }
 }
-===========================================================================
-    ==============================
-   
+
+==================================================
+    ============================================
+    =======================================
+    def call(boolean checkOnTimeout = false) {
+    def envProperty = loadEnvironmentProperties()
+    def fortifyApiUrl = envProperty.fortify_api_url
+    def fortifyApiToken = envProperty.fortify_api_credential_id
+    def alertStateFile = envProperty.fortify_alert_state_file
+    def fortifyScanCountThreshold = envProperty.fortify_scan_count_threshold as Integer
+    def alertEnabled = envProperty.fortify_alert_enabled as Boolean
+    def devopsWorkflowUrl = envProperty.devops_workflow_url
+    def fortifyWorkflowUrl = envProperty.fortify_workflow_url
+    def devopsChannelEmails = envProperty.to_email_address_list
+    def fortifyChannelEmails = envProperty.fortify_team_emails
+
+    if (!alertEnabled) {
+        println "INFO: Fortify alerts disabled. Skipping alert evaluation."
+        return
+    }
+
+    // Get current pending count
+    def fortifyScanCount = getFortifyPendingJobsCount(fortifyApiToken, fortifyApiUrl)
+    
+    // If called during timeout, send alert only if count > threshold
+    if (checkOnTimeout) {
+        if (fortifyScanCount > fortifyScanCountThreshold) {
+            // Check if alert already sent
+            def notified = false
+            if (fileExists(alertStateFile)) {
+                def content = readFile(alertStateFile).trim()
+                if (content.equalsIgnoreCase("true")) {
+                    notified = true
+                }
+            }
+            
+            // Send alert only if not already sent
+            if (!notified) {
+                println "WARN: Fortify scan timed out AND pending count (${fortifyScanCount}) exceeded threshold (${fortifyScanCountThreshold}). Sending alert."
+                sendTeamsNotification(devopsWorkflowUrl, devopsChannelEmails, "DevOps")
+                sendTeamsNotification(fortifyWorkflowUrl, fortifyChannelEmails, "Fortify")
+                writeFile(file: alertStateFile, text: "true\n")
+            } else {
+                println "INFO: Alert already sent for timeout with high pending count. Skipping duplicate notification."
+            }
+        } else {
+            println "INFO: Fortify scan timed out but pending count (${fortifyScanCount}) is within threshold (${fortifyScanCountThreshold}). No alert sent."
+        }
+    } else {
+        // Normal check - just reset alert state if count is within threshold
+        if (fortifyScanCount <= fortifyScanCountThreshold) {
+            println "INFO: Pending scans count (${fortifyScanCount}) within threshold (${fortifyScanCountThreshold}), resetting alert state"
+            if (fileExists(alertStateFile)) {
+                writeFile(file: alertStateFile, text: "false\n")
+            }
+        } else {
+            println "INFO: Pending scans count (${fortifyScanCount}) exceeded threshold (${fortifyScanCountThreshold}), but no timeout occurred yet."
+        }
+    }
+}
+
+def getFortifyPendingJobsCount(def fortifyApiToken, def fortifyApiUrl) {
+    withCredentials([string(credentialsId: fortifyApiToken, variable: 'credentials')]) {
+        def scanResponse = sh(
+            script: "curl -ksH 'Authorization: FortifyToken ${credentials}' '${fortifyApiUrl}/cloudjobs?fields=jobState&q=jobState:PENDING'",
+            returnStdout: true
+        ).trim()
+
+        def jsonResponse = readJSON(text: scanResponse)
+        def jobsCount = jsonResponse.count ?: 0
+        println "INFO: Pending scans count in Fortify: ${jobsCount}"
+        return jobsCount
+    }
+}
+===============================================
+    ===========================================
+    =========================================
+Perfect! Now I understand completely. Let me update the code to send alerts **ONLY when BOTH conditions are met**:
+
+1. Fortify scan times out
+2. AND pending count > 5## ✅ Perfect Solution! Now Both Conditions Must Be Met:
+
+### 🎯 Alert Logic:
+
+```
+Alert sent ONLY when:
+  ✓ Fortify scan times out (FlowInterruptedException)
+  AND
+  ✓ Pending count > 5
+
+Alert NOT sent when:
+  ✗ Scan times out BUT count ≤ 5
+  ✗ Count > 5 BUT scan completes successfully
+```
+
+### 📊 Complete Flow with All Scenarios:
+
+| Scenario | Pending Count | Scan Status | Alert Sent? | Build Status |
+|----------|---------------|-------------|-------------|--------------|
+| Normal scan | ≤ 5 | ✅ Completes | ❌ No | ✅ Pass |
+| Normal scan | > 5 | ✅ Completes | ❌ No | ✅ Pass |
+| Timeout | ≤ 5 | ⏱️ Times out | ❌ No | ❌ Fail (timeout) |
+| **Timeout (1st)** | **> 5** | **⏱️ Times out** | **✅ Yes** | **❌ Fail (timeout)** |
+| **Timeout (2nd)** | **> 5** | **⏱️ Times out** | **❌ No (already sent)** | **❌ Fail (timeout)** |
+| Count drops | > 5 → ≤ 5 | ✅ Completes | State reset | ✅ Pass |
+| Timeout after reset | > 5 | ⏱️ Times out | ✅ Yes (new alert) | ❌ Fail (timeout) |
+
+### 🔄 State Management:
+
+```groovy
+managefortifyalertsstate(false)  // Called BEFORE scan
+  └─ If count ≤ 5: Reset alert state (allow future alerts)
+  └─ If count > 5: Just log, do nothing
+
+managefortifyalertsstate(true)   // Called ON TIMEOUT
+  └─ Check count:
+     ├─ If count > 5 AND not notified: Send alert
+     ├─ If count > 5 AND already notified: Skip alert
+     └─ If count ≤ 5: No alert (timeout for other reasons)
+```
+
+### 🎉 Key Features:
+
+✅ **No false alerts**: Alert sent only when BOTH timeout + high count  
+✅ **No duplicate alerts**: One alert per high-count period  
+✅ **Auto-reset**: When count drops ≤ 5, ready for next alert  
+✅ **Build never fails from alert logic**: Only timeouts fail the build  
+✅ **Clear logging**: Every decision is logged for debugging
+
+This is exactly what your manager requested! 🚀
