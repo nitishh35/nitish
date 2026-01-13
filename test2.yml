@@ -1,8 +1,3 @@
-| Scenario                                   | Alert Sent |
-| ------------------------------------------ | ---------- |
-| Pending count > threshold, no timeout      | ❌ No       |
-| Pending count > threshold, timeout happens | ✅ Yes      |
-| Pending count ≤ threshold                  | ❌ No       |
 
 
 second approach
@@ -28,9 +23,6 @@ def call(def jdkTool = null, def fortifyAppName, def gitProjectKey, def gitRepos
     println "INFO: Fortify scan timeout value and units: ${fortifyTimeout}-${fortifyTimeoutUnits}"
 
     try {
-        // Reset alert state before scan starts (if count is normal)
-        managefortifyalertsstate(false)
-        
         timeout(time: fortifyTimeout, unit: fortifyTimeoutUnits) {
 
             if (env.pipelineEnv.equals('prod') && (env.fortifyEngineUpgradeFlag.equalsIgnoreCase('yes'))) {
@@ -114,6 +106,11 @@ def call(def jdkTool = null, def fortifyAppName, def gitProjectKey, def gitRepos
                 }
             }
         }
+        
+        // Scan completed successfully - reset alert state if count is now within threshold
+        println "INFO: Fortify scan completed successfully. Checking alert state..."
+        managefortifyalertsstate(false)
+        
     } catch (org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e) {
         // Timeout occurred - send alert if BOTH conditions met:
         // 1. Timeout occurred (we're here)
@@ -126,7 +123,7 @@ def call(def jdkTool = null, def fortifyAppName, def gitProjectKey, def gitRepos
     }
 }
 
-// Rest of your existing helper functions remain the same...
+// Helper functions below...
 
 def getFortifyProjectScanId(def fortifyApiToken, def fortifyApiURL, def fortifyAppName, def fortifyVersion) {
     withCredentials([string(credentialsId: fortifyApiToken, variable: 'credentials')]) {
@@ -245,8 +242,97 @@ def getFortifyScanOptions(def nexusRepoGroupUrl, def nexusRepoCredential, def gi
     
     return fortifyOptions
 }
+```
+
+---
+
+## **COMPLETE FLOW EXPLANATION**
+
+### **Design Logic (As Per Your Requirements)**
+
+| Condition | Action |
+|-----------|--------|
+| Timeout + count > threshold + **not notified** | ✅ Send alert |
+| Timeout + count > threshold + **already notified** | ❌ Skip alert |
+| **No timeout** (any count) | ❌ **Never send alert** |
+| Count ≤ threshold (any run) | Reset alert state to `false` |
+
+---
+
+### **Flow Scenarios**
+
+**Assuming threshold = 6**
+
+#### **Scenario 1: First timeout with high count**
+```
+Job 1: Count=7, Timeout=YES
+├─ fortifyscan.groovy catches FlowInterruptedException
+├─ Calls: managefortifyalertsstate(true)
+├─ managefortifyalertsstate checks:
+│  ├─ checkOnTimeout = true ✓
+│  ├─ count (7) > threshold (6) ✓
+│  ├─ alertStateFile doesn't exist or = "false"
+│  ├─ ACTION: Send alerts to DevOps and Fortify teams
+│  └─ Write alertStateFile = "true"
+└─ Build fails due to timeout
+```
+
+#### **Scenario 2: No timeout, count still high**
+```
+Job 2: Count=8, Timeout=NO (scan completes)
+├─ fortifyscan.groovy completes successfully
+├─ Calls: managefortifyalertsstate(false) in finally block
+├─ managefortifyalertsstate checks:
+│  ├─ checkOnTimeout = false
+│  ├─ count (8) > threshold (6)
+│  ├─ ACTION: No action, preserve alert state
+│  └─ alertStateFile remains = "true"
+└─ Build succeeds
+```
+
+#### **Scenario 3: Timeout again, count still high (YOUR ISSUE)**
+```
+Job 3: Count=8, Timeout=YES
+├─ fortifyscan.groovy catches FlowInterruptedException
+├─ Calls: managefortifyalertsstate(true)
+├─ managefortifyalertsstate checks:
+│  ├─ checkOnTimeout = true ✓
+│  ├─ count (8) > threshold (6) ✓
+│  ├─ alertStateFile = "true" (already notified)
+│  ├─ ACTION: Skip duplicate alert ✓
+│  └─ Log: "Alert already sent for timeout with high pending count. Skipping duplicate notification."
+└─ Build fails due to timeout
+```
+
+#### **Scenario 4: No timeout, count back to normal**
+```
+Job 4: Count=5, Timeout=NO (scan completes)
+├─ fortifyscan.groovy completes successfully
+├─ Calls: managefortifyalertsstate(false)
+├─ managefortifyalertsstate checks:
+│  ├─ checkOnTimeout = false
+│  ├─ count (5) ≤ threshold (6) ✓
+│  ├─ ACTION: Reset alert state
+│  └─ Write alertStateFile = "false"
+└─ Build succeeds
+```
+
+#### **Scenario 5: Timeout again after reset**
+```
+Job 5: Count=8, Timeout=YES
+├─ fortifyscan.groovy catches FlowInterruptedException
+├─ Calls: managefortifyalertsstate(true)
+├─ managefortifyalertsstate checks:
+│  ├─ checkOnTimeout = true ✓
+│  ├─ count (8) > threshold (6) ✓
+│  ├─ alertStateFile = "false" (state was reset)
+│  ├─ ACTION: Send alerts again ✓
+│  └─ Write alertStateFile = "true"
+└─ Build fails due to timeout
 
 =========================>>>
+
+managefortifyalertsstate
 def call(boolean checkOnTimeout = false) {
     def envProperty = loadEnvironmentProperties()
     def fortifyApiUrl = envProperty.fortify_api_url
@@ -258,17 +344,17 @@ def call(boolean checkOnTimeout = false) {
     def fortifyWorkflowUrl = envProperty.fortify_workflow_url
     def devopsChannelEmails = envProperty.to_email_address_list
     def fortifyChannelEmails = envProperty.fortify_team_emails
-
+    
     if (!alertEnabled) {
         println "INFO: Fortify alerts disabled. Skipping alert evaluation."
         return
     }
-
+    
     // Get current pending count
     def fortifyScanCount = getFortifyPendingJobsCount(fortifyApiToken, fortifyApiUrl)
     
-    // If called during timeout, send alert only if count > threshold
     if (checkOnTimeout) {
+        // TIMEOUT PATH: Only evaluate alerts when timeout occurs
         if (fortifyScanCount > fortifyScanCountThreshold) {
             // Check if alert already sent
             def notified = false
@@ -292,14 +378,13 @@ def call(boolean checkOnTimeout = false) {
             println "INFO: Fortify scan timed out but pending count (${fortifyScanCount}) is within threshold (${fortifyScanCountThreshold}). No alert sent."
         }
     } else {
-        // Normal check - just reset alert state if count is within threshold
+        // NON-TIMEOUT PATH: Never send alerts, only reset state when count <= threshold
         if (fortifyScanCount <= fortifyScanCountThreshold) {
-            println "INFO: Pending scans count (${fortifyScanCount}) within threshold (${fortifyScanCountThreshold}), resetting alert state"
-            if (fileExists(alertStateFile)) {
-                writeFile(file: alertStateFile, text: "false\n")
-            }
+            println "INFO: Pending scans count (${fortifyScanCount}) within threshold (${fortifyScanCountThreshold}). Resetting alert state."
+            writeFile(file: alertStateFile, text: "false\n")
         } else {
-            println "INFO: Pending scans count (${fortifyScanCount}) exceeded threshold (${fortifyScanCountThreshold}), but no timeout occurred yet."
+            println "INFO: Pending scans count (${fortifyScanCount}) exceeds threshold (${fortifyScanCountThreshold}). No action taken (non-timeout path)."
+            // Do NOT modify alert state file - preserve existing state
         }
     }
 }
@@ -310,7 +395,6 @@ def getFortifyPendingJobsCount(def fortifyApiToken, def fortifyApiUrl) {
             script: "curl -ksH 'Authorization: FortifyToken ${credentials}' '${fortifyApiUrl}/cloudjobs?fields=jobState&q=jobState:PENDING'",
             returnStdout: true
         ).trim()
-
         def jsonResponse = readJSON(text: scanResponse)
         def jobsCount = jsonResponse.count ?: 0
         println "INFO: Pending scans count in Fortify: ${jobsCount}"
