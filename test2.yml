@@ -332,7 +332,7 @@ Job 5: Count=8, Timeout=YES
 
 =========================>>>
 
-managefortifyalertsstate
+managefortifyalertsstate - claude
 def call(boolean checkOnTimeout = false) {
     def envProperty = loadEnvironmentProperties()
     def fortifyApiUrl = envProperty.fortify_api_url
@@ -407,3 +407,101 @@ def getFortifyPendingJobsCount(def fortifyApiToken, def fortifyApiUrl) {
         return jobsCount
     }
 }
+
+--------------
+managefortifyalertstate - chagpt
+def call(boolean checkOnTimeout = false) {
+
+    def envProperty = loadEnvironmentProperties()
+
+    def fortifyApiUrl             = envProperty.fortify_api_url
+    def fortifyApiToken           = envProperty.fortify_api_credential_id
+    def alertStateFile            = envProperty.fortify_alert_state_file
+    def fortifyScanCountThreshold = envProperty.fortify_scan_count_threshold as Integer
+
+    def alertEnabled = (
+        envProperty.fortify_alert_enabled != null &&
+        envProperty.fortify_alert_enabled.toString().trim().equalsIgnoreCase("true")
+    )
+
+    def devopsWorkflowUrl     = envProperty.devops_workflow_url
+    def fortifyWorkflowUrl    = envProperty.fortify_workflow_url
+    def devopsChannelEmails  = envProperty.to_email_address_list
+    def fortifyChannelEmails = envProperty.fortify_team_emails
+
+    if (!alertEnabled) {
+        println "INFO: Fortify alerts disabled. Skipping alert evaluation."
+        return
+    }
+
+    // Replace this with API call in real execution
+    // def fortifyScanCount = getFortifyPendingJobsCount(fortifyApiToken, fortifyApiUrl)
+    def fortifyScanCount = 7
+
+    println "INFO: Fortify pending scan count = ${fortifyScanCount}"
+    println "INFO: Fortify scan threshold     = ${fortifyScanCountThreshold}"
+    println "INFO: Timeout evaluation flag    = ${checkOnTimeout}"
+
+    // ---------------- READ ALERT STATE ----------------
+    def notified = false
+    if (fileExists(alertStateFile)) {
+        def content = readFile(alertStateFile).trim()
+        println "DEBUG: Alert state file content = '${content}'"
+        if (content.equalsIgnoreCase("true")) {
+            notified = true
+        }
+    } else {
+        println "DEBUG: Alert state file does not exist"
+    }
+
+    // ---------------- TIMEOUT PATH ----------------
+    if (checkOnTimeout) {
+
+        if (fortifyScanCount > fortifyScanCountThreshold) {
+
+            if (!notified) {
+                println "WARN: Timeout occurred AND pending count exceeded threshold. Sending alert."
+
+                sendTeamsNotification(devopsWorkflowUrl, devopsChannelEmails, "DevOps")
+                sendTeamsNotification(fortifyWorkflowUrl, fortifyChannelEmails, "Fortify")
+
+                writeFile(file: alertStateFile, text: "true\n")
+                println "DEBUG: Alert state set to true"
+            } else {
+                println "INFO: Alert already sent earlier. Skipping duplicate notification."
+            }
+
+        } else {
+            println "INFO: Timeout occurred but pending count is within threshold. Resetting alert state."
+            writeFile(file: alertStateFile, text: "false\n")
+        }
+
+    }
+    // ---------------- NON-TIMEOUT PATH ----------------
+    else {
+
+        if (fortifyScanCount <= fortifyScanCountThreshold) {
+            println "INFO: Pending count within threshold. Resetting alert state."
+            writeFile(file: alertStateFile, text: "false\n")
+        } else {
+            println "INFO: Pending count exceeded threshold but no timeout occurred. Preserving alert state."
+        }
+    }
+}
+def getFortifyPendingJobsCount(def fortifyApiToken, def fortifyApiUrl) {
+
+    withCredentials([string(credentialsId: fortifyApiToken, variable: 'credentials')]) {
+
+        def scanResponse = sh(
+            script: "curl -ksH 'Authorization: FortifyToken ${credentials}' '${fortifyApiUrl}/cloudjobs?fields=jobState&q=jobState:PENDING'",
+            returnStdout: true
+        ).trim()
+
+        def jsonResponse = readJSON(text: scanResponse)
+        def jobsCount = jsonResponse.count ?: 0
+
+        println "INFO: Pending scans count in Fortify: ${jobsCount}"
+        return jobsCount
+    }
+}
+
