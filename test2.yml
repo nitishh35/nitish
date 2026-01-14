@@ -376,6 +376,7 @@ def call(boolean checkOnTimeout = false) {
             }
         } else {
             println "INFO: Fortify scan timed out but pending count (${fortifyScanCount}) is within threshold (${fortifyScanCountThreshold}). No alert sent."
+            writeFile(file: alertStateFile, text: "false\n")
         }
     } else {
         // NON-TIMEOUT PATH: Never send alerts, only reset state when count <= threshold
@@ -401,66 +402,3 @@ def getFortifyPendingJobsCount(def fortifyApiToken, def fortifyApiUrl) {
         return jobsCount
     }
 }
-
-========================
-
-Ah, I see! You want to keep your existing Jenkinsfile structure. Let me modify the `fortifyScan` function itself to handle this logic internally, so you don't need to change your Jenkinsfile at all.## ✅ Perfect! No Jenkinsfile Changes Required!
-
-### What Changed:
-
-**Only modified `fortifyscan.groovy`** - Added try-catch block inside the function itself to handle timeouts and trigger alerts.
-
-### Your Jenkinsfile Stays Exactly The Same:
-
-```groovy
-'scan: fortify': {
-    stage('scan: fortify') {
-        logStage('scan-fortify') {
-            fortifyScan(infoSecScanAppName, gitProjectKey, gitRepositoryName, gitPullRequestId, fortifyVersion, gitBranch)
-        }
-    }
-}
-```
-
-**No changes needed!** ✨
-
-### How It Works:
-
-1. **Inside `fortifyScan()`**:
-   - Calls `managefortifyalertsstate(false)` at start (resets alert if count normal)
-   - Wraps entire scan logic in `try-catch`
-   - If timeout occurs → catches `FlowInterruptedException`
-   - Calls `managefortifyalertsstate(true)` on timeout
-   - Re-throws exception to fail the build
-
-2. **`managefortifyalertsstate()` logic**:
-   - `(false)` = Normal check, reset state if count ≤ 5
-   - `(true)` = Timeout occurred, send alert if count > 5 AND not already sent
-
-### Complete Flow:
-
-```
-Jenkins calls: fortifyScan()
-  ↓
-fortifyScan() internally:
-  ├─ Call managefortifyalertsstate(false) → Reset if count normal
-  ├─ Start timeout block
-  ├─ Execute Fortify scan
-  │
-  ├─ IF SUCCESS:
-  │  └─ Continue normally ✅
-  │
-  └─ IF TIMEOUT (catch block):
-     ├─ Log error
-     ├─ Call managefortifyalertsstate(true)
-     │  └─ Send alert ONLY if count > 5 AND not notified
-     └─ Re-throw exception → Build fails ❌
-```
-
-### Files to Update:
-
-1. **`fortifyscan.groovy`** - Replace with the updated version
-2. **`managefortifyalertsstate.groovy`** - Replace with the updated version
-3. **`jenkinsfile`** - **NO CHANGES NEEDED** ✅
-
-This keeps your existing pipeline structure intact! 🎉
