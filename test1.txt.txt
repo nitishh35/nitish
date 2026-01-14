@@ -1,1043 +1,145 @@
-I've created a comprehensive yet concise Confluence article for your DSE DevOps coding standards and pipeline validation guide. Here's what's included:
+def call(boolean checkOnTimeout = false) {
 
-**Key Sections:**
+    def envProperty = loadEnvironmentProperties()
 
-1. **Code Readability Standards** - Naming conventions and structure with examples
-2. **Pipeline Validation Steps** - 6-step validation process with commands
-3. **Testing External Notifications** - 3 safe testing methods (mock mode, test channels, feature flags)
-4. **DOs and DON'Ts** - Clear tables with 8 DOs and 8 DON'Ts
-5. **Repository & Branch Strategy** - Specific repos for validation with branch flow
-6. **Build & Version Settings** - Jenkins configuration recommendations
-7. **Validation Checklist** - Quick pre-merge checklist
-8. **Quick Reference Examples** - 3 practical code examples
+    def fortifyApiUrl             = envProperty.fortify_api_url
+    def fortifyApiToken           = envProperty.fortify_api_credential_id
+    def alertStateFile            = envProperty.fortify_alert_state_file
+    def fortifyScanCountThreshold = envProperty.fortify_scan_count_threshold as Integer
 
-**Format Features:**
-- Short and crisp with tables for easy scanning
-- Real code examples relevant to your Fortify notification use case
-- Clear visual indicators (✅ ❌ ⚠️)
-- Practical commands and configurations
-- Covers all acceptance criteria
-
-You can copy this directly into Confluence - the markdown formatting will render properly. Would you like me to adjust any section or add more specific examples?
-
-==============================
-
-
-================================
-
-
-===============================
-# DSE DevOps - Code Readability & Pipeline Validation Guide
-
-## 1. Overview
-
-This document establishes coding standards, validation procedures, and best practices for DSE DevOps team members working with Jenkins Pipelines, Shared Libraries, and automation scripts.
-
----
-
-## 2. Code Readability Standards
-
-### Naming Conventions
-- **Variables**: Use camelCase (`fortifyApiToken`, `pendingJobCount`)
-- **Functions**: Use descriptive verbs (`getFortifyPendingJobsCount`, `notifyTeamsChannel`)
-- **Files**: Use lowercase with hyphens (`fortify-notification.groovy`)
-
-### Code Structure
-- Add comments for complex logic blocks
-- Use consistent indentation (4 spaces)
-- Keep functions under 50 lines where possible
-- Group related variables together
-
-**Example:**
-```groovy
-// Good
-def fortifyApiToken = envProperty.fortify_api_credential_id
-def fortifyApiURL = envProperty.fortify_api_url
-def pendingJobThreshold = envProperty.fortify_count_threshold as Integer
-
-// Bad
-def x = envProperty.fortify_api_credential_id
-def url123 = envProperty.fortify_api_url
-```
-
----
-
-## 3. Pipeline Validation Steps
-
-### Step-by-Step Validation Process
-
-**Step 1: Create Feature Branch**
-```bash
-git checkout -b feature/your-feature-name
-```
-
-**Step 2: Local Syntax Check**
-```bash
-# For Groovy files
-groovy -cp . yourScript.groovy --compile-only
-```
-
-**Step 3: Use Test Repositories**
-- **DO NOT** validate in production repositories
-- Use designated test repositories:
-  - `dse-devops-test-pipeline`
-  - `dse-sandbox-app`
-  - `dse-validation-project`
-
-**Step 4: Test Build Configuration**
-- **Build Type**: Use `freestyle` or `pipeline` test jobs
-- **Branch**: `feature/*` or `test/*` branches only
-- **Jenkins Instance**: Use `jenkins-dev.company.com` (NOT production)
-
-**Step 5: Run Validation Build**
-```groovy
-// In Jenkinsfile
-pipeline {
-    agent any
-    stages {
-        stage('Validate') {
-            steps {
-                sh 'echo "Running validation..."'
-                // Your validation logic
-            }
-        }
-    }
-}
-```
-
-**Step 6: Code Review & Merge**
-- Create Pull Request
-- Require 2 approvals minimum
-- Merge to `develop` → then `main`
-
----
-
-## 4. Testing Changes with External Notifications
-
-### Safe Testing Practices
-
-**⚠️ CRITICAL: Never test notifications in production pipelines**
-
-### Option 1: Mock Notifications (Recommended)
-```groovy
-def notifyTeamsChannel(def mockMode = false) {
-    if (mockMode) {
-        println "MOCK: Would send notification to Teams channel"
+    def alertEnabled = envProperty.fortify_alert_enabled?.toBoolean()
+    if (!alertEnabled) {
+        println "INFO: Fortify alerts disabled. Skipping alert evaluation."
         return
     }
-    // Actual notification logic
-}
-```
 
-### Option 2: Use Test Channels
-- **Production Channel**: `#dse-prod-alerts` ❌ DO NOT USE
-- **Test Channel**: `#dse-test-notifications` ✅ USE THIS
+    def devopsWorkflowUrl     = envProperty.devops_workflow_url
+    def fortifyWorkflowUrl    = envProperty.fortify_workflow_url
+    def devopsChannelEmails   = envProperty.to_email_address_list
+    def fortifyChannelEmails  = envProperty.fortify_team_emails
 
-### Option 3: Feature Flags
-```groovy
-def notificationEnabled = (env.BRANCH_NAME == 'main') ? true : false
+    // Get current pending scan count
+    def fortifyScanCount = getFortifyPendingJobsCount(fortifyApiToken, fortifyApiUrl)
 
-if (notificationEnabled) {
-    notifyTeamsChannel()
-}
-```
+    println "INFO: Fortify pending scan count = ${fortifyScanCount}"
+    println "INFO: Fortify scan threshold     = ${fortifyScanCountThreshold}"
+    println "INFO: Timeout evaluation flag    = ${checkOnTimeout}"
 
-### Example: Testing Fortify Notifications
-```groovy
-// Add test parameter to your shared library
-def call(def testMode = false) {
-    if (testMode) {
-        println "TEST MODE: Notification skipped"
-        // Test your logic without sending real notifications
+    // -------- READ CURRENT ALERT STATE --------
+    def alertAlreadySent = false
+    if (fileExists(alertStateFile)) {
+        def content = readFile(alertStateFile).trim()
+        println "DEBUG: Alert state file exists with content = '${content}'"
+        if (content.equalsIgnoreCase("true")) {
+            alertAlreadySent = true
+        }
     } else {
-        notifyTeamsChannel()
+        println "DEBUG: Alert state file does not exist. Creating with initial state = false"
+        writeFile(file: alertStateFile, text: "false")
     }
-}
-```
 
----
-
-## 5. DOs and DON'Ts
-
-### ✅ DOs
-
-| Practice | Example |
-|----------|---------|
-| Use descriptive variable names | `def pendingJobThreshold` |
-| Add comments for complex logic | `// Reset notification state after success` |
-| Validate in test repositories | `dse-devops-test-pipeline` |
-| Use feature branches | `feature/fortify-notification` |
-| Enable test mode for notifications | `call(testMode: true)` |
-| Handle errors gracefully | `try { ... } catch (e) { ... }` |
-| Use credentials from Jenkins | `withCredentials([...])` |
-| Log important steps | `println "INFO: Threshold exceeded"` |
-
-### ❌ DON'Ts
-
-| Practice | Why It's Wrong |
-|----------|----------------|
-| Test in production repositories | Risk of impacting live systems |
-| Hardcode credentials | Security vulnerability |
-| Skip code reviews | Reduces code quality |
-| Use generic variable names (`x`, `temp`) | Reduces readability |
-| Send test notifications to production channels | Creates false alerts |
-| Commit directly to `main` branch | Bypasses validation |
-| Use `sleep()` for synchronization | Inefficient, unreliable |
-| Ignore error handling | Causes silent failures |
-
----
-
-## 6. Repository & Branch Strategy
-
-### Repositories for Validation
-
-| Repository | Purpose | Branch to Use |
-|------------|---------|---------------|
-| `dse-devops-test-pipeline` | Pipeline testing | `feature/*` |
-| `dse-sandbox-app` | Application testing | `test/*` |
-| `dse-shared-libraries-test` | Library validation | `feature/*` |
-| `dse-validation-project` | Integration testing | `develop` |
-
-### Branch Strategy
-
-**Development Flow:**
-```
-feature/* → develop → staging → main (production)
-```
-
-**For Validation:**
-- Create branch: `feature/your-change`
-- Test in: `dse-devops-test-pipeline` repository
-- Merge to: `develop` (after approval)
-- Production release: Merge `develop` → `main`
-
----
-
-## 7. Recommended Build & Version Settings
-
-### Jenkins Job Configuration
-
-**Build Type:**
-- **New Features**: Pipeline job (Jenkinsfile from SCM)
-- **Quick Tests**: Freestyle job with Groovy script
-
-**Recommended Versions:**
-- **Jenkins**: v2.400+ (LTS)
-- **Groovy**: v2.4.21+
-- **JDK**: OpenJDK 11 or 17
-
-**Build Parameters Example:**
-```groovy
-parameters {
-    booleanParam(name: 'TEST_MODE', defaultValue: true, description: 'Enable test mode')
-    string(name: 'BRANCH_NAME', defaultValue: 'feature/test', description: 'Branch to build')
-    choice(name: 'ENVIRONMENT', choices: ['dev', 'test', 'staging'], description: 'Target environment')
-}
-```
-
-### App Version Tagging
-```bash
-# Semantic versioning
-v1.2.3-dev      # Development
-v1.2.3-rc.1     # Release candidate
-v1.2.3          # Production
-```
-
----
-
-## 8. Validation Checklist
-
-Before merging your changes, ensure:
-
-- [ ] Code follows naming conventions
-- [ ] Comments added for complex logic
-- [ ] Tested in designated test repository
-- [ ] No hardcoded credentials
-- [ ] External notifications disabled or mocked
-- [ ] Error handling implemented
-- [ ] Feature branch created and used
-- [ ] Code review completed (2+ approvals)
-- [ ] Build successful in test environment
-- [ ] Documentation updated if needed
-
----
-
-## 9. Quick Reference Examples
-
-### Example 1: Adding Mock Mode to Notification Function
-```groovy
-def notifyTeamsChannel(def testMode = false) {
-    if (testMode) {
-        println "TEST MODE: Skipping Teams notification"
-        return
-    }
-    
-    def webhookUrl = env.TEAMS_WEBHOOK_URL
-    // Send actual notification
-}
-
-// Usage in pipeline
-notifyTeamsChannel(testMode: true)  // For testing
-notifyTeamsChannel(testMode: false) // For production
-```
-
-### Example 2: Safe API Testing
-```groovy
-def getFortifyPendingJobsCount(def mockMode = false) {
-    if (mockMode) {
-        println "MOCK: Returning test count = 5"
-        return 5
-    }
-    
-    // Actual API call
-    withCredentials([...]) {
-        // Real implementation
-    }
-}
-```
-
-### Example 3: Environment-Based Notification
-```groovy
-def shouldNotify() {
-    def environment = env.ENVIRONMENT ?: 'dev'
-    return (environment == 'production')
-}
-
-if (shouldNotify()) {
-    notifyTeamsChannel()
-} else {
-    println "Non-production environment: notification skipped"
-}
-```
-
----
-
-## 10. Support & Questions
-
-**Contact:**
-- Slack: `#dse-devops-support`
-- Email: `dse-devops@company.com`
-- Documentation: [Internal Wiki](https://wiki.company.com/dse-devops)
-
-**Document Version:** 1.0  
-**Last Updated:** December 2025  
-**Owner:** DSE DevOps Team
-
-======================================
-
-
-new article
-
-
-I'll update the Confluence article with more accurate examples based on your actual pipeline validation practices. Here's the revised version:I've updated the Confluence article with accurate examples based on your actual practices. Here are the key improvements:
-
-## Major Changes:
-
-1. **Pipeline Validation Steps** - Now reflects your actual workflow:
-   - Use **actual application repositories** (e.g., `ecom-api`)
-   - Create `feature/*` branches for DEV, `hotfix/*` for PROD
-   - No mention of `develop` branch (since DSE team doesn't use it)
-   - Create separate POC Jenkins jobs for testing
-
-2. **Repository Strategy** - Clear guidance with real examples:
-   - Use the application repo that your change impacts
-   - Examples: `ecom-api`, `payment-service`
-   - Specific naming conventions for POC jobs
-
-3. **Notification Testing** - Three practical options:
-   - Boolean parameter (`ENABLE_NOTIFICATION = false`)
-   - Hardcoded disable in POC jobs
-   - Scenario-based parameters
-
-4. **Hardcoding Variables Section** - New section explaining:
-   - When hardcoding is appropriate in POC jobs
-   - Example with your actual `SCENARIO` and `MOCK_COUNT` parameters
-   - Full POC job example matching your structure
-
-5. **Real Pipeline Examples** - Based on your actual Jenkinsfiles:
-   - Simplified DEV pipeline example
-   - Simplified PROD pipeline example
-   - Shows only stages needed for testing
-
-6. **Testing Workflow** - Three-phase approach:
-   - Phase 1: Test with notifications disabled
-   - Phase 2: Final validation with one notification test
-   - Phase 3: Production deployment
-
-The article now accurately reflects your team's actual practices and includes your real POC job structure!
-
-
-======================
-
-=========================
-
-
-# DSE DevOps - Code Readability & Pipeline Validation Guide
-
-## 1. Overview
-
-This document establishes coding standards, validation procedures, and best practices for DSE DevOps team members working with Jenkins Pipelines, Shared Libraries, and automation scripts.
-
----
-
-## 2. Code Readability Standards
-
-### Naming Conventions
-- **Variables**: Use camelCase (`fortifyApiToken`, `pendingJobCount`, `mockCount`)
-- **Functions**: Use descriptive verbs (`getFortifyPendingJobsCount`, `notifyTeamsChannel`, `updateGlobalCounter`)
-- **Files**: Use lowercase with hyphens (`fortify-notification.groovy`)
-
-### Code Structure
-- Add comments for complex logic blocks
-- Use consistent indentation (4 spaces)
-- Keep functions under 50 lines where possible
-- Group related variables together
-
-**Example:**
-```groovy
-// Good
-def fortifyApiToken = envProperty.fortify_api_credential_id
-def fortifyApiURL = envProperty.fortify_api_url
-def pendingJobThreshold = envProperty.fortify_count_threshold as Integer
-
-// Bad
-def x = envProperty.fortify_api_credential_id
-def url123 = envProperty.fortify_api_url
-```
-
----
-
-## 3. Pipeline Validation Steps
-
-### Step-by-Step Validation Process
-
-**Step 1: Identify Application Repository**
-- Use the **actual application repository** that your change will impact
-- DO NOT use generic test repositories for application-specific changes
-- Example: If validating Fortify notification for `ecom-api`, use `ecom-api` repository
-
-**Step 2: Create Appropriate Branch**
-
-For **DEV Pipeline:**
-```bash
-git checkout -b feature/your-story-id-description
-# Example: feature/DSE-1234-fortify-notification
-```
-
-For **PROD Pipeline:**
-```bash
-git checkout -b hotfix/your-story-id-description
-# Example: hotfix/DSE-1234-fortify-notification-fix
-```
-
-**Important Notes:**
-- DSE team creates branches as per story assignments
-- We **DO NOT** use `develop` branch for validation
-- Branch naming follows: `feature/*` for dev, `hotfix/*` for prod
-
-**Step 3: Create POC Jenkins Job**
-
-Create a separate POC job for testing (DO NOT modify production jobs):
-
-**Job Naming Convention:**
-- Dev: `ecom-api-dev-poc-fortify-test`
-- Prod: `ecom-api-prod-poc-fortify-test`
-
-**Step 4: Configure POC Job with Test Parameters**
-
-Add parameters to control testing scenarios:
-
-```groovy
-properties([
-    parameters([
-        choice(
-            name: 'SCENARIO',
-            choices: ['FAILURE', 'SUCCESS', 'NORMAL'],
-            description: 'Choose POC scenario'
-        ),
-        string(
-            name: 'MOCK_COUNT',
-            defaultValue: '0',
-            description: 'Simulated fortifyScanCount for testing'
-        ),
-        booleanParam(
-            name: 'ENABLE_NOTIFICATION',
-            defaultValue: false,
-            description: 'Enable Teams notification (keep false during testing)'
-        )
-    ])
-])
-```
-
-**Step 5: Test Only Required Stages**
-
-You don't need to include all stages - only the ones you're testing:
-
-```groovy
-node(env.dse_worker_node) {
-    ansiColor('xterm') {
-        try {
-            println "============== POC TEST START =============="
-            println "Selected Scenario       : ${params.SCENARIO}"
-            println "Mock Fortify Count      : ${params.MOCK_COUNT}"
-            println "Notification Enabled    : ${params.ENABLE_NOTIFICATION}"
-            println "============================================="
-            
-            def mockCount = params.MOCK_COUNT as Integer
-            
-            // Only include stages you need to test
-            stage('POC: Run Scenario') {
-                if (params.SCENARIO == 'FAILURE') {
-                    println "POC → Simulating FAILURE scenario"
-                    updateGlobalCounter("runCheck", mockCount)
-                    error("Simulated failure for POC testing")
-                } else if (params.SCENARIO == 'SUCCESS') {
-                    println "POC → Simulating SUCCESS scenario"
-                    updateGlobalCounter("resetWithoutNotification")
-                } else {
-                    println "POC → Simulating NORMAL scenario"
-                    updateGlobalCounter("runCheck", mockCount)
-                }
-            }
-            
-            println "POC Completed Successfully"
-            
-        } catch (err) {
-            println "=========== FAILURE HANDLING BLOCK ==========="
-            println "Build failed → Executing failure logic"
-            def mockCount = params.MOCK_COUNT as Integer
-            updateGlobalCounter("runCheck", mockCount)
-            throw err
-            
-        } finally {
-            println "=========== FINALLY BLOCK EXECUTED ==========="
-            
-            // Conditional notification based on parameter
-            if (params.ENABLE_NOTIFICATION) {
-                println "Sending Teams Notification"
-                sendTeamsNotification()
+    println "INFO: Alert already sent = ${alertAlreadySent}"
+
+    // ====================================================================
+    // TIMEOUT PATH: Only send alert if NOT already sent
+    // ====================================================================
+    if (checkOnTimeout) {
+        println "DEBUG: Entered TIMEOUT path"
+
+        if (fortifyScanCount > fortifyScanCountThreshold) {
+            println "DEBUG: Pending count (${fortifyScanCount}) EXCEEDS threshold (${fortifyScanCountThreshold})"
+
+            // KEY FIX: Check if alert was already sent before sending
+            if (alertAlreadySent) {
+                println "INFO: ✓ Alert ALREADY SENT for timeout with high pending count. SKIPPING duplicate notification."
+                // Do NOT send alerts again
+                // Do NOT modify state file (keep it as "true")
             } else {
-                println "Notification DISABLED for testing"
+                println "WARN: ✗ First timeout with high pending count. SENDING ALERT NOW."
+                
+                // Send alerts to both teams
+                sendTeamsNotification(devopsWorkflowUrl, devopsChannelEmails, "DevOps")
+                sendTeamsNotification(fortifyWorkflowUrl, fortifyChannelEmails, "Fortify")
+
+                // Mark alert as sent
+                writeFile(file: alertStateFile, text: "true")
+                println "DEBUG: Alert state file updated to 'true'"
             }
-            
-            println "============== POC TEST END =============="
+
+        } else {
+            // Timeout occurred but count is within threshold
+            println "INFO: Timeout occurred but pending count (${fortifyScanCount}) is WITHIN threshold (${fortifyScanCountThreshold}). Resetting alert state."
+            writeFile(file: alertStateFile, text: "false")
         }
-    }
-}
-```
 
-**Step 6: Test in Both DEV and PROD Regions**
-
-Create separate POC jobs for each environment:
-
-| Environment | POC Job Name | Branch Type | Purpose |
-|-------------|--------------|-------------|---------|
-| DEV | `ecom-api-dev-poc-notification` | `feature/*` | Test dev pipeline changes |
-| PROD | `ecom-api-prod-poc-notification` | `hotfix/*` | Test prod pipeline changes |
-
-Test scenarios in both jobs to ensure consistency across environments.
-
-**Step 7: Validation Complete - Cleanup**
-
-After successful testing:
-- Delete POC Jenkins jobs
-- Delete test branches (if not needed)
-- Merge validated changes to appropriate branch
-- Enable notifications in production
-
----
-
-## 4. Testing Changes with External Notifications
-
-### ⚠️ CRITICAL: Disable Notifications During Testing
-
-**Problem:** Teams channels with leads and application team members receive false alerts during testing.
-
-**Solution:** Always disable notifications during validation phase.
-
-### Option 1: Use Boolean Parameter (Recommended)
-```groovy
-properties([
-    parameters([
-        booleanParam(
-            name: 'ENABLE_NOTIFICATION',
-            defaultValue: false,
-            description: 'Enable Teams notification (keep FALSE during testing)'
-        )
-    ])
-])
-
-// In your notification function
-def sendTeamsNotification() {
-    if (!params.ENABLE_NOTIFICATION) {
-        println "INFO: Notification DISABLED for testing"
         return
     }
-    
-    // Actual notification logic
-    notifyTeamsChannel()
-}
-```
 
-### Option 2: Hardcode Notification Disable in POC Job
-```groovy
-// In POC job - explicitly disable notifications
-def notificationEnabled = false  // Hardcoded for POC
+    // ====================================================================
+    // NON-TIMEOUT PATH (SUCCESS): Reset state only when count is normal
+    // ====================================================================
+    println "DEBUG: Entered NON-TIMEOUT (success) path"
 
-if (notificationEnabled) {
-    sendTeamsNotification()
-} else {
-    println "Notifications disabled for POC testing"
-}
-```
-
-### Option 3: Use Test Scenario Parameters
-```groovy
-properties([
-    parameters([
-        choice(
-            name: 'SCENARIO',
-            choices: ['FAILURE', 'SUCCESS', 'NORMAL'],
-            description: 'Test scenario'
-        ),
-        booleanParam(
-            name: 'SEND_NOTIFICATION',
-            defaultValue: false,
-            description: 'Send actual notification (enable only after testing complete)'
-        )
-    ])
-])
-
-finally {
-    if (params.SEND_NOTIFICATION) {
-        sendTeamsNotification()
+    if (fortifyScanCount <= fortifyScanCountThreshold) {
+        println "DEBUG: Pending count (${fortifyScanCount}) is WITHIN threshold (${fortifyScanCountThreshold})"
+        
+        if (alertAlreadySent) {
+            println "INFO: System recovered. Pending count back to normal. RESETTING alert state to 'false'."
+            writeFile(file: alertStateFile, text: "false")
+        } else {
+            println "INFO: Pending count within threshold and alert state already 'false'. No action needed."
+        }
     } else {
-        println "Notification skipped - testing mode"
+        println "INFO: Pending count (${fortifyScanCount}) still EXCEEDS threshold (${fortifyScanCountThreshold}). Preserving alert state (no timeout occurred)."
+        // Do NOT modify state file - preserve existing state
     }
 }
-```
 
-### Testing Workflow
+def getFortifyPendingJobsCount(def fortifyApiToken, def fortifyApiUrl) {
 
-**Phase 1: Initial Testing (Notifications DISABLED)**
-1. Create POC job with `ENABLE_NOTIFICATION = false`
-2. Test all scenarios: FAILURE, SUCCESS, NORMAL
-3. Verify logic without sending actual notifications
-4. Check console logs for expected behavior
+    withCredentials([string(credentialsId: fortifyApiToken, variable: 'credentials')]) {
 
-**Phase 2: Final Validation (Notifications ENABLED)**
-1. After confirming logic is correct
-2. Change `ENABLE_NOTIFICATION = true`
-3. Run ONE final test to verify notification is sent correctly
-4. Immediately disable notifications again
+        def scanResponse = sh(
+            script: "curl -ksH 'Authorization: FortifyToken ${credentials}' '${fortifyApiUrl}/cloudjobs?fields=jobState&q=jobState:PENDING'",
+            returnStdout: true
+        ).trim()
 
-**Phase 3: Production Deployment**
-1. Merge changes to production
-2. Enable notifications in production Jenkins jobs
-3. Monitor first few real notifications
+        def jsonResponse = readJSON(text: scanResponse)
+        def jobsCount = jsonResponse.count ?: 0
 
----
+        println "INFO: Pending scans count in Fortify: ${jobsCount}"
+        return jobsCount
+    }
+}
 
-## 5. Repository Strategy for Validation
-
-### Which Repository to Use?
-
-**Rule:** Use the application repository that your change impacts.
-
-| Scenario | Repository to Use | Example |
-|----------|-------------------|---------|
-| Fortify notification for E-commerce API | `ecom-api` | Actual app repository |
-| Build validation for Payment Service | `payment-service` | Actual app repository |
-| Shared library change affecting multiple apps | Pick one representative app | `ecom-api` or `payment-service` |
-| General pipeline template change | Any active application repo | Choose most commonly used app |
-
-### Real-World Examples
-
-**Example 1: Fortify Notification for E-commerce API**
-```
-Repository:     ecom-api
-Branch (Dev):   feature/DSE-1234-fortify-notification
-Branch (Prod):  hotfix/DSE-1234-fortify-notification
-POC Job (Dev):  ecom-api-dev-poc-fortify
-POC Job (Prod): ecom-api-prod-poc-fortify
-```
-
-**Example 2: Deployment Validation for Payment Service**
-```
-Repository:     payment-service
-Branch (Dev):   feature/DSE-5678-deploy-validation
-Branch (Prod):  hotfix/DSE-5678-deploy-validation
-POC Job (Dev):  payment-service-dev-poc-deploy
-POC Job (Prod): payment-service-prod-poc-deploy
-```
-
-**Example 3: Shared Library Update (affects multiple apps)**
-```
-Test Repository: ecom-api (representative application)
-Branch:          feature/DSE-9012-shared-library-update
-POC Job:         ecom-api-dev-poc-shared-lib-test
-Note:            Test with one app first, then roll out to others
-```
-
----
-
-## 6. DOs and DON'Ts
-
-### ✅ DOs
-
-| Practice | Example |
-|----------|---------|
-| Use actual application repository | `ecom-api`, `payment-service` |
-| Create separate POC jobs for testing | `ecom-api-dev-poc-notification` |
-| Disable notifications during testing | `ENABLE_NOTIFICATION = false` |
-| Test in both DEV and PROD regions | Create POC jobs for both environments |
-| Use feature branches for dev | `feature/DSE-1234-description` |
-| Use hotfix branches for prod | `hotfix/DSE-1234-description` |
-| Add hardcoded test parameters | `MOCK_COUNT`, `SCENARIO` parameters |
-| Test only stages you're modifying | Don't copy entire pipeline |
-| Enable notifications only after validation | Final test before production |
-| Delete POC jobs after testing | Clean up temporary test jobs |
-
-### ❌ DON'Ts
-
-| Practice | Why It's Wrong |
-|----------|----------------|
-| Use `develop` branch | DSE team doesn't use this branch |
-| Use generic test repositories | Changes are application-specific |
-| Test with notifications enabled | Sends false alerts to teams |
-| Modify production Jenkins jobs | Creates risk for live pipelines |
-| Skip testing in PROD region | DEV and PROD may behave differently |
-| Copy entire pipeline for POC | Wastes time, test only what's needed |
-| Leave POC jobs after testing | Clutters Jenkins instance |
-| Test in production channels | Alerts application support teams |
-| Forget to enable notifications in prod | Changes won't work in production |
-| Use unclear branch names | Follow story-based naming convention |
-
----
-
-## 7. Hardcoding Variables for Testing
-
-### When to Hardcode Variables
-
-Hardcoding is acceptable in POC jobs for:
-- **Test parameters** that control scenarios
-- **Mock data** for external API responses
-- **Feature flags** to enable/disable functionality
-- **Notification toggles** to prevent false alerts
-
-### Common Hardcoded Variables in POC Jobs
-
-```groovy
-properties([
-    parameters([
-        // Scenario control
-        choice(
-            name: 'SCENARIO',
-            choices: ['FAILURE', 'SUCCESS', 'NORMAL'],
-            description: 'Choose test scenario'
-        ),
+def sendTeamsNotification(def workflowUrl, def emailList, def teamName) {
+    try {
+        def emails = emailList instanceof List ? emailList : emailList.split(',')
+        def emailParams = ""
         
-        // Mock external data
-        string(
-            name: 'MOCK_COUNT',
-            defaultValue: '0',
-            description: 'Simulated fortifyScanCount for testing'
-        ),
+        emails.eachWithIndex { email, index ->
+            emailParams += "\"email${index + 1}\":\"${email.trim()}\","
+        }
         
-        // Notification control
-        booleanParam(
-            name: 'ENABLE_NOTIFICATION',
-            defaultValue: false,
-            description: 'Enable Teams notification'
-        ),
+        // Remove trailing comma
+        emailParams = emailParams.replaceAll(/,$/, '')
         
-        // Environment override
-        string(
-            name: 'TEST_ENVIRONMENT',
-            defaultValue: 'poc',
-            description: 'Environment identifier'
-        )
-    ])
-])
-
-// Hardcoded threshold for testing
-def testThreshold = 3  // Lower than production threshold
-
-// Hardcoded notification status
-def sendNotifications = false  // Always false in POC
-```
-
-### Example: Full POC Job with Hardcoded Values
-
-```groovy
-properties([
-    parameters([
-        choice(name: 'SCENARIO', choices: ['FAILURE', 'SUCCESS', 'NORMAL']),
-        string(name: 'MOCK_COUNT', defaultValue: '5'),
-        booleanParam(name: 'ENABLE_NOTIFICATION', defaultValue: false)
-    ])
-])
-
-node('any') {
-    ansiColor('xterm') {
-        try {
-            // Hardcoded values for POC testing
-            def pocEnvironment = 'POC-TEST'
-            def mockThreshold = 3
-            def notificationsEnabled = false  // Hardcoded OFF
-            
-            println "========== POC TEST CONFIGURATION =========="
-            println "Environment: ${pocEnvironment}"
-            println "Mock Threshold: ${mockThreshold}"
-            println "Notifications: ${notificationsEnabled ? 'ENABLED' : 'DISABLED'}"
-            println "Scenario: ${params.SCENARIO}"
-            println "Mock Count: ${params.MOCK_COUNT}"
-            println "==========================================="
-            
-            def mockCount = params.MOCK_COUNT as Integer
-            
-            stage('POC: Simulate Scenario') {
-                if (params.SCENARIO == 'FAILURE') {
-                    updateGlobalCounter("runCheck", mockCount)
-                    error("Simulated failure")
-                } else if (params.SCENARIO == 'SUCCESS') {
-                    updateGlobalCounter("resetWithoutNotification")
-                } else {
-                    updateGlobalCounter("runCheck", mockCount)
-                }
-            }
-            
-        } catch (err) {
-            println "Build failed - executing failure logic"
-            def mockCount = params.MOCK_COUNT as Integer
-            updateGlobalCounter("runCheck", mockCount)
-            throw err
-            
-        } finally {
-            // Respect the parameter, but default is false
-            if (params.ENABLE_NOTIFICATION) {
-                println "Sending notification (enabled by parameter)"
-                sendTeamsNotification()
-            } else {
-                println "Notification SKIPPED (disabled for POC)"
-            }
-        }
+        def pipelineUrl = env.BUILD_URL ?: "Unknown"
+        
+        def payload = "{${emailParams},\"pipelineurl\":\"${pipelineUrl}\"}"
+        
+        println "INFO: Sending ${teamName} Teams notification..."
+        println "DEBUG: Payload: ${payload}"
+        
+        def response = sh(
+            script: "curl -s -w 'HTTP_CODE=%{http_code}' -H 'Content-Type: application/json' -H 'Accept: application/json' -X POST '${workflowUrl}' -d '${payload}'",
+            returnStdout: true
+        ).trim()
+        
+        println "INFO: ${teamName} notification sent. Response: ${response}"
+        
+    } catch (Exception e) {
+        println "ERROR: Failed to send ${teamName} notification: ${e.message}"
+        // Don't fail the pipeline if notification fails
     }
 }
-```
-
----
-
-## 8. Real Pipeline Examples
-
-### Example 1: DEV Pipeline (ecom-api)
-
-**File:** `ecom-api-dev-jenkinsfile` (simplified for validation)
-
-```groovy
-node(env.dse_worker_node) {
-    def gitProjectKey = params.PROJECT_KEY
-    def gitRepositoryName = params.REPOSITORY_NAME
-    def gitBranch = params.BRANCH
-    
-    env.pipelineEnv = 'dev'
-    
-    ansiColor('xterm') {
-        try {
-            timeout(time: 40, unit: 'MINUTES') {
-                
-                stage('checkout') {
-                    logStage('checkout') {
-                        validateBuildReplayed()
-                        gitSCMCodeCheckout(gitProjectKey, gitRepositoryName, gitBranch)
-                    }
-                }
-                
-                stage('build') {
-                    logStage('build') {
-                        buildProgress()
-                        appVersion = determineAppVersion(getAppVersionMaven(), gitBranch)
-                        buildMaven(appVersion)
-                    }
-                }
-                
-                // Test only the stages you're validating
-                parallel(
-                    'scan: fortify': {
-                        stage('scan: fortify') {
-                            logStage('scan-fortify') {
-                                fortifyScan(infoSecScanAppName, gitProjectKey, 
-                                          gitRepositoryName, gitPullRequestId, 
-                                          fortifyVersion, gitBranch)
-                            }
-                        }
-                    }
-                )
-                
-                buildSuccess()
-            }
-            
-        } catch(err) {
-            handleBuildFailure(err)
-            
-        } finally {
-            if(currentBuild.result == 'FAILURE') {
-                handleFailure()
-            }
-            sendTeamsNotification()
-        }
-    }
-}
-```
-
-### Example 2: PROD Pipeline (ecom-api)
-
-**File:** `ecom-api-prod-jenkinsfile` (simplified for validation)
-
-```groovy
-node(env.dse_worker_node) {
-    def gitProjectKey = params.PROJECT_KEY
-    def gitRepositoryName = params.REPOSITORY_NAME
-    def gitBranch = params.BRANCH
-    
-    env.pipelineEnv = 'prod'
-    env.fortifyEngineUpgradeFlag = params.FORTIFY_SCAN_ENGINE_NEW_VERSION ?: 'no'
-    
-    ansiColor('xterm') {
-        try {
-            timeout(time: 40, unit: 'MINUTES') {
-                
-                stage('checkout') {
-                    logStage('checkout') {
-                        validateBuildReplayed()
-                        scmVars = gitSCMCodeCheckout(gitProjectKey, gitRepositoryName, gitBranch)
-                    }
-                }
-                
-                stage('validate: build already exists') {
-                    logStage('validate-build-already-exists') {
-                        validateBuildAlreadyExists(scmVars)
-                    }
-                }
-                
-                stage('validate: master-sync') {
-                    logStage('validate-master-sync') {
-                        if(gitBranch != 'master') {
-                            validateWithMaster(gitBranch)
-                        } else {
-                            println "INFO: Skipping master-sync validation"
-                        }
-                    }
-                }
-                
-                stage('build') {
-                    logStage('build') {
-                        buildProgress()
-                        appVersion = determineAppVersion(getAppVersionMaven(), gitBranch)
-                        buildMaven(appVersion)
-                    }
-                }
-                
-                // Test only relevant stages
-                parallel(
-                    'scan: fortify': {
-                        stage('scan: fortify') {
-                            logStage('scan-fortify') {
-                                fortifyScan(infoSecScanAppName, gitProjectKey, 
-                                          gitRepositoryName, gitPullRequestId, 
-                                          fortifyVersion, gitBranch)
-                            }
-                        }
-                    }
-                )
-                
-                buildSuccess()
-            }
-            
-        } catch(err) {
-            handleBuildFailure(err)
-            
-        } finally {
-            if(currentBuild.result == 'FAILURE') {
-                handleFailure()
-            }
-            sendTeamsNotification()
-        }
-    }
-}
-```
-
----
-
-## 9. Validation Checklist
-
-Before merging your changes, ensure:
-
-### Code Quality
-- [ ] Code follows naming conventions (camelCase for variables)
-- [ ] Comments added for complex logic blocks
-- [ ] No hardcoded credentials or sensitive data
-- [ ] Error handling implemented with try-catch blocks
-
-### Testing
-- [ ] Created POC Jenkins job (not modified production job)
-- [ ] Tested in actual application repository (not generic test repo)
-- [ ] Feature branch created for DEV (`feature/*`)
-- [ ] Hotfix branch created for PROD (`hotfix/*`)
-- [ ] Tested in both DEV and PROD regions
-- [ ] All test scenarios validated (FAILURE, SUCCESS, NORMAL)
-
-### Notifications
-- [ ] Notifications DISABLED during initial testing (`ENABLE_NOTIFICATION = false`)
-- [ ] Final validation with notifications enabled (one test only)
-- [ ] Verified notification content is correct
-- [ ] Confirmed no false alerts sent to teams
-
-### Cleanup & Deployment
-- [ ] POC Jenkins jobs deleted after testing
-- [ ] Test branches cleaned up (if not needed)
-- [ ] Code review completed (2+ approvals)
-- [ ] Notifications enabled in production
-- [ ] Documentation updated
-
----
-
-## 10. Common Pitfalls & Solutions
-
-### Pitfall 1: Testing in Production Job
-**Problem:** Modifying production Jenkins job for testing  
-**Solution:** Always create separate POC job
-
-### Pitfall 2: Using Wrong Repository
-**Problem:** Using generic test repository instead of actual app repo  
-**Solution:** Use the application repository your change impacts
-
-### Pitfall 3: Notifications Not Disabled
-**Problem:** Sending test notifications to production Teams channels  
-**Solution:** Use `ENABLE_NOTIFICATION = false` parameter
-
-### Pitfall 4: Only Testing in DEV
-**Problem:** Not validating changes in PROD environment  
-**Solution:** Create and test POC jobs for both DEV and PROD
-
-### Pitfall 5: Copying Entire Pipeline
-**Problem:** Including all stages in POC job unnecessarily  
-**Solution:** Only include stages you're testing
-
-### Pitfall 6: Forgetting to Enable Notifications in Production
-**Problem:** Changes deployed but notifications don't work  
-**Solution:** After validation, enable notifications in production
-
----
-
-## 11. Support & Questions
-
-**Contact:**
-- Slack: `#dse-devops-support`
-- Email: `dse-devops@company.com`
-- Documentation: [Internal Wiki](https://wiki.company.com/dse-devops)
-
-**Document Version:** 2.0  
-**Last Updated:** December 2025  
-**Owner:** DSE DevOps Team
-
