@@ -419,10 +419,8 @@ def call(boolean checkOnTimeout = false) {
     def alertStateFile            = envProperty.fortify_alert_state_file
     def fortifyScanCountThreshold = envProperty.fortify_scan_count_threshold as Integer
 
-    def alertEnabled = (
-        envProperty.fortify_alert_enabled != null &&
-        envProperty.fortify_alert_enabled.toString().trim().equalsIgnoreCase("true")
-    )
+    def alertEnabled = envProperty.fortify_alert_enabled?.toBoolean()
+
 
     def devopsWorkflowUrl     = envProperty.devops_workflow_url
     def fortifyWorkflowUrl    = envProperty.fortify_workflow_url
