@@ -420,27 +420,24 @@ def call(boolean checkOnTimeout = false) {
     def fortifyScanCountThreshold = envProperty.fortify_scan_count_threshold as Integer
 
     def alertEnabled = envProperty.fortify_alert_enabled?.toBoolean()
-
+    if (!alertEnabled) {
+        println "INFO: Fortify alerts disabled. Skipping alert evaluation."
+        return
+    }
 
     def devopsWorkflowUrl     = envProperty.devops_workflow_url
     def fortifyWorkflowUrl    = envProperty.fortify_workflow_url
     def devopsChannelEmails  = envProperty.to_email_address_list
     def fortifyChannelEmails = envProperty.fortify_team_emails
 
-    if (!alertEnabled) {
-        println "INFO: Fortify alerts disabled. Skipping alert evaluation."
-        return
-    }
-
-    // Replace this with API call in real execution
-    // def fortifyScanCount = getFortifyPendingJobsCount(fortifyApiToken, fortifyApiUrl)
-    def fortifyScanCount = 7
+    // Get current pending scan count
+    def fortifyScanCount = getFortifyPendingJobsCount(fortifyApiToken, fortifyApiUrl)
 
     println "INFO: Fortify pending scan count = ${fortifyScanCount}"
     println "INFO: Fortify scan threshold     = ${fortifyScanCountThreshold}"
     println "INFO: Timeout evaluation flag    = ${checkOnTimeout}"
 
-    // ---------------- READ ALERT STATE ----------------
+    // -------- READ ALERT STATE ONCE --------
     def notified = false
     if (fileExists(alertStateFile)) {
         def content = readFile(alertStateFile).trim()
@@ -452,7 +449,9 @@ def call(boolean checkOnTimeout = false) {
         println "DEBUG: Alert state file does not exist"
     }
 
-    // ---------------- TIMEOUT PATH ----------------
+    println "INFO: Alert already sent = ${notified}"
+
+    // -------- TIMEOUT PATH --------
     if (checkOnTimeout) {
 
         if (fortifyScanCount > fortifyScanCountThreshold) {
@@ -466,26 +465,28 @@ def call(boolean checkOnTimeout = false) {
                 writeFile(file: alertStateFile, text: "true\n")
                 println "DEBUG: Alert state set to true"
             } else {
-                println "INFO: Alert already sent earlier. Skipping duplicate notification."
+                println "INFO: Alert already sent for this incident. Skipping duplicate notification."
             }
 
         } else {
+            // Timeout occurred but system has recovered
             println "INFO: Timeout occurred but pending count is within threshold. Resetting alert state."
             writeFile(file: alertStateFile, text: "false\n")
         }
 
+        return
     }
-    // ---------------- NON-TIMEOUT PATH ----------------
-    else {
 
-        if (fortifyScanCount <= fortifyScanCountThreshold) {
-            println "INFO: Pending count within threshold. Resetting alert state."
-            writeFile(file: alertStateFile, text: "false\n")
-        } else {
-            println "INFO: Pending count exceeded threshold but no timeout occurred. Preserving alert state."
-        }
+    // -------- NON-TIMEOUT PATH --------
+    // Reset ONLY when system recovers
+    if (fortifyScanCount <= fortifyScanCountThreshold && notified) {
+        println "INFO: Pending count back to normal. Resetting alert state."
+        writeFile(file: alertStateFile, text: "false\n")
+    } else {
+        println "INFO: No alert state change in non-timeout run."
     }
 }
+
 def getFortifyPendingJobsCount(def fortifyApiToken, def fortifyApiUrl) {
 
     withCredentials([string(credentialsId: fortifyApiToken, variable: 'credentials')]) {
