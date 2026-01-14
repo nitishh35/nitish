@@ -360,9 +360,13 @@ def call(boolean checkOnTimeout = false) {
             def notified = false
             if (fileExists(alertStateFile)) {
                 def content = readFile(alertStateFile).trim()
+                println "DEBUG: Alert state file content: '${content}'"
                 if (content.equalsIgnoreCase("true")) {
                     notified = true
+                    println "DEBUG: Alert already sent flag set to true"
                 }
+            } else {
+                println "DEBUG: Alert state file does not exist"
             }
             
             // Send alert only if not already sent
@@ -370,19 +374,20 @@ def call(boolean checkOnTimeout = false) {
                 println "WARN: Fortify scan timed out AND pending count (${fortifyScanCount}) exceeded threshold (${fortifyScanCountThreshold}). Sending alert."
                 sendTeamsNotification(devopsWorkflowUrl, devopsChannelEmails, "DevOps")
                 sendTeamsNotification(fortifyWorkflowUrl, fortifyChannelEmails, "Fortify")
-                writeFile(file: alertStateFile, text: "true\n")
+                writeFile(file: alertStateFile, text: "true")
+                println "DEBUG: Alert state file written with value 'true'"
             } else {
                 println "INFO: Alert already sent for timeout with high pending count. Skipping duplicate notification."
             }
         } else {
             println "INFO: Fortify scan timed out but pending count (${fortifyScanCount}) is within threshold (${fortifyScanCountThreshold}). No alert sent."
-            writeFile(file: alertStateFile, text: "false\n")
+            writeFile(file: alertStateFile, text: "false")
         }
     } else {
         // NON-TIMEOUT PATH: Never send alerts, only reset state when count <= threshold
         if (fortifyScanCount <= fortifyScanCountThreshold) {
             println "INFO: Pending scans count (${fortifyScanCount}) within threshold (${fortifyScanCountThreshold}). Resetting alert state."
-            writeFile(file: alertStateFile, text: "false\n")
+            writeFile(file: alertStateFile, text: "false")
         } else {
             println "INFO: Pending scans count (${fortifyScanCount}) exceeds threshold (${fortifyScanCountThreshold}). No action taken (non-timeout path)."
             // Do NOT modify alert state file - preserve existing state
