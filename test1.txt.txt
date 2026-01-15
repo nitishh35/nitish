@@ -1,263 +1,146 @@
+new code with lock
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 def call(boolean checkOnTimeout = false) {
 
+    /* ---------------------------------------------------------
+       Load environment configuration
+    ---------------------------------------------------------- */
     def envProperty = loadEnvironmentProperties()
 
     def fortifyApiUrl             = envProperty.fortify_api_url
     def fortifyApiToken           = envProperty.fortify_api_credential_id
-    def alertStateFile            = envProperty.fortify_alert_state_file
     def fortifyScanCountThreshold = envProperty.fortify_scan_count_threshold as Integer
+    def alertEnabled              = envProperty.fortify_alert_enabled as Boolean
 
-    def alertEnabled = envProperty.fortify_alert_enabled?.toBoolean()
+    def devopsWorkflowUrl         = envProperty.devops_workflow_url
+    def fortifyWorkflowUrl        = envProperty.fortify_workflow_url
+    def devopsChannelEmails       = envProperty.to_email_address_list
+    def fortifyChannelEmails      = envProperty.fortify_team_emails
+
+    /* ---------------------------------------------------------
+       IMPORTANT: Use a GLOBAL state file (not workspace)
+    ---------------------------------------------------------- */
+    def alertStateFile = "/var/jenkins_home/fortify-alert-state/${env.JOB_NAME}.state"
+
     if (!alertEnabled) {
-        println "INFO: Fortify alerts disabled. Skipping alert evaluation."
+        println "INFO: Fortify alerts are disabled. Skipping alert evaluation."
         return
     }
 
-    def devopsWorkflowUrl     = envProperty.devops_workflow_url
-    def fortifyWorkflowUrl    = envProperty.fortify_workflow_url
-    def devopsChannelEmails   = envProperty.to_email_address_list
-    def fortifyChannelEmails  = envProperty.fortify_team_emails
+    /* ---------------------------------------------------------
+       Get pending Fortify scan count
+    ---------------------------------------------------------- */
+    def fortifyScanCount = getFortifyPendingJobsCount(
+        fortifyApiToken,
+        fortifyApiUrl
+    )
 
-    // Get current pending scan count
-    def fortifyScanCount = getFortifyPendingJobsCount(fortifyApiToken, fortifyApiUrl)
+    println "INFO: Current Fortify pending scan count: ${fortifyScanCount}"
 
-    println "INFO: =========================================="
-    println "INFO: Fortify Alert State Manager"
-    println "INFO: =========================================="
-    println "INFO: Fortify pending scan count = ${fortifyScanCount}"
-    println "INFO: Fortify scan threshold     = ${fortifyScanCountThreshold}"
-    println "INFO: Timeout evaluation flag    = ${checkOnTimeout}"
-    println "INFO: Alert state file path      = ${alertStateFile}"
+    /* ---------------------------------------------------------
+       LOCKED SECTION – ONLY ONE BUILD AT A TIME
+    ---------------------------------------------------------- */
+    lock(resource: "fortify-alert-lock") {
 
-    // -------- READ CURRENT ALERT STATE --------
-    def alertAlreadySent = false
-    if (fileExists(alertStateFile)) {
-        try {
-            def content = readFile(alertStateFile).trim()
-            println "DEBUG: Alert state file exists with content = '${content}'"
-            if (content.equalsIgnoreCase("true")) {
-                alertAlreadySent = true
-            } else if (content.equalsIgnoreCase("false")) {
-                alertAlreadySent = false
-            } else {
-                println "WARN: Alert state file contains unexpected value '${content}'. Treating as false."
-                alertAlreadySent = false
-            }
-        } catch (Exception e) {
-            println "ERROR: Failed to read alert state file: ${e.message}"
-            println "DEBUG: Treating alert state as false (not sent)"
-            alertAlreadySent = false
-        }
-    } else {
-        println "DEBUG: Alert state file does not exist. Creating with initial state = false"
-        try {
-            writeFile(file: alertStateFile, text: "false")
-            println "DEBUG: Successfully created state file"
-        } catch (Exception e) {
-            println "ERROR: Failed to create alert state file: ${e.message}"
-        }
-        alertAlreadySent = false
-    }
+        /* ------------------ TIMEOUT PATH ------------------- */
+        if (checkOnTimeout) {
 
-    println "INFO: Alert already sent = ${alertAlreadySent}"
-    println "INFO: ==========================================\n"
+            if (fortifyScanCount > fortifyScanCountThreshold) {
 
-    // ====================================================================
-    // TIMEOUT PATH: Only send alert if NOT already sent
-    // ====================================================================
-    if (checkOnTimeout) {
-        println "DEBUG: *** TIMEOUT PATH ENTERED ***"
+                boolean alertAlreadySent = false
 
-        if (fortifyScanCount > fortifyScanCountThreshold) {
-            println "DEBUG: Pending count (${fortifyScanCount}) EXCEEDS threshold (${fortifyScanCountThreshold})"
-
-            // KEY FIX: Check if alert was already sent before sending
-            if (alertAlreadySent) {
-                println "INFO: =========================================="
-                println "INFO: ✓ DUPLICATE TIMEOUT ALERT PREVENTED"
-                println "INFO: =========================================="
-                println "INFO: Alert ALREADY SENT for timeout with high pending count."
-                println "INFO: SKIPPING duplicate notification to prevent alert spam."
-                println "INFO: State file preserved as 'true'"
-                println "INFO: ==========================================\n"
-                // Do NOT send alerts again
-                // Do NOT modify state file (keep it as "true")
-            } else {
-                println "WARN: =========================================="
-                println "WARN: ✗ FIRST TIMEOUT ALERT - SENDING NOW"
-                println "WARN: =========================================="
-                println "WARN: First timeout with high pending count detected!"
-                println "WARN: Pending count: ${fortifyScanCount} > Threshold: ${fortifyScanCountThreshold}"
-                println "WARN: SENDING ALERTS to DevOps and Fortify teams..."
-                
-                // Send alerts to both teams
-                def devopsSuccess = sendTeamsNotification(devopsWorkflowUrl, devopsChannelEmails, "DevOps")
-                def fortifySuccess = sendTeamsNotification(fortifyWorkflowUrl, fortifyChannelEmails, "Fortify")
-
-                // Mark alert as sent only if at least one notification succeeded
-                if (devopsSuccess || fortifySuccess) {
-                    try {
-                        writeFile(file: alertStateFile, text: "true")
-                        println "DEBUG: ✓ Alert state file write attempted with value 'true'"
-                        
-                        // Verify the write was successful
-                        if (fileExists(alertStateFile)) {
-                            def verifyContent = readFile(alertStateFile).trim()
-                            println "DEBUG: ✓ Verified state file content = '${verifyContent}'"
-                            if (verifyContent == "true") {
-                                println "INFO: ✓ Alert state successfully saved as 'true'"
-                            } else {
-                                println "ERROR: ✗ State file verification FAILED! Expected 'true' but got '${verifyContent}'"
-                            }
-                        } else {
-                            println "ERROR: ✗ State file does not exist after write attempt!"
-                        }
-                    } catch (Exception e) {
-                        println "ERROR: Failed to write alert state file: ${e.message}"
-                        e.printStackTrace()
-                    }
-                } else {
-                    println "ERROR: Both notifications failed. State file NOT updated."
+                if (fileExists(alertStateFile)) {
+                    def state = readFile(alertStateFile).trim()
+                    alertAlreadySent = state.equalsIgnoreCase("true")
                 }
-                println "WARN: ==========================================\n"
+
+                if (!alertAlreadySent) {
+
+                    println "WARN: Fortify scan timed out and pending count " +
+                            "(${fortifyScanCount}) exceeded threshold " +
+                            "(${fortifyScanCountThreshold}). Sending alert."
+
+                    sendTeamsNotification(
+                        devopsWorkflowUrl,
+                        devopsChannelEmails,
+                        "DevOps"
+                    )
+
+                    sendTeamsNotification(
+                        fortifyWorkflowUrl,
+                        fortifyChannelEmails,
+                        "Fortify"
+                    )
+
+                    writeFile(
+                        file: alertStateFile,
+                        text: "true\n"
+                    )
+
+                } else {
+                    println "INFO: Alert already sent. Suppressing duplicate."
+                }
+
+            } else {
+                println "INFO: Timeout occurred but pending count within threshold. No alert sent."
             }
 
-        } else {
-            // Timeout occurred but count is within threshold
-            println "INFO: =========================================="
-            println "INFO: TIMEOUT WITH NORMAL COUNT - RESETTING"
-            println "INFO: =========================================="
-            println "INFO: Timeout occurred but pending count (${fortifyScanCount}) is WITHIN threshold (${fortifyScanCountThreshold})."
-            println "INFO: Resetting alert state to allow future alerts if needed."
-            try {
-                writeFile(file: alertStateFile, text: "false")
-                println "DEBUG: Alert state file updated to 'false'"
-                
-                // Verify
-                def verifyContent = readFile(alertStateFile).trim()
-                println "DEBUG: Verified state file content = '${verifyContent}'"
-            } catch (Exception e) {
-                println "ERROR: Failed to reset alert state file: ${e.message}"
-            }
-            println "INFO: ==========================================\n"
+            return
         }
 
-        return
-    }
+        /* ---------------- NON-TIMEOUT PATH ----------------- */
+        if (fortifyScanCount <= fortifyScanCountThreshold) {
 
-    // ====================================================================
-    // NON-TIMEOUT PATH (SUCCESS): Reset state only when count is normal
-    // ====================================================================
-    println "DEBUG: *** NON-TIMEOUT (SUCCESS) PATH ENTERED ***"
+            println "INFO: Pending scans back within threshold. Resetting alert state."
 
-    if (fortifyScanCount <= fortifyScanCountThreshold) {
-        println "DEBUG: Pending count (${fortifyScanCount}) is WITHIN threshold (${fortifyScanCountThreshold})"
-        
-        if (alertAlreadySent) {
-            println "INFO: =========================================="
-            println "INFO: ✓ SYSTEM RECOVERED - RESETTING ALERT STATE"
-            println "INFO: =========================================="
-            println "INFO: System recovered! Pending count back to normal."
-            println "INFO: Previous count was HIGH and alert was sent."
-            println "INFO: Current count: ${fortifyScanCount} <= Threshold: ${fortifyScanCountThreshold}"
-            println "INFO: RESETTING alert state to 'false' to allow future alerts."
-            try {
-                writeFile(file: alertStateFile, text: "false")
-                println "DEBUG: Alert state file updated to 'false'"
-                
-                // Verify
-                def verifyContent = readFile(alertStateFile).trim()
-                println "DEBUG: Verified state file content = '${verifyContent}'"
-                println "INFO: ✓ Alert state successfully reset"
-            } catch (Exception e) {
-                println "ERROR: Failed to reset alert state file: ${e.message}"
-            }
-            println "INFO: ==========================================\n"
+            writeFile(
+                file: alertStateFile,
+                text: "false\n"
+            )
+
         } else {
-            println "INFO: Pending count (${fortifyScanCount}) is within threshold (${fortifyScanCountThreshold})."
-            println "INFO: Alert state already 'false'. No action needed."
+            println "INFO: Pending scans exceeded threshold but no timeout. No alert sent."
         }
-    } else {
-        println "INFO: =========================================="
-        println "INFO: SUCCESS BUT COUNT STILL HIGH - NO ACTION"
-        println "INFO: =========================================="
-        println "INFO: Scan completed successfully (no timeout)."
-        println "INFO: BUT pending count (${fortifyScanCount}) still EXCEEDS threshold (${fortifyScanCountThreshold})."
-        println "INFO: Alert state = '${alertAlreadySent ? "true" : "false"}' (PRESERVED - no change)"
-        println "INFO: Explanation: No timeout occurred, so no alert action needed."
-        println "INFO: State will reset when count drops to ${fortifyScanCountThreshold} or below."
-        println "INFO: ==========================================\n"
-        // Do NOT modify state file - preserve existing state
     }
 }
 
+/* =========================================================
+   Fortify API – Pending scan count
+========================================================= */
 def getFortifyPendingJobsCount(def fortifyApiToken, def fortifyApiUrl) {
 
-    withCredentials([string(credentialsId: fortifyApiToken, variable: 'credentials')]) {
+    withCredentials([
+        string(credentialsId: fortifyApiToken, variable: 'FORTIFY_TOKEN')
+    ]) {
 
-        try {
-            def scanResponse = sh(
-                script: "curl -ksH 'Authorization: FortifyToken ${credentials}' '${fortifyApiUrl}/cloudjobs?fields=jobState&q=jobState:PENDING'",
-                returnStdout: true
-            ).trim()
-
-            def jsonResponse = readJSON(text: scanResponse)
-            def jobsCount = jsonResponse.count ?: 0
-
-            println "INFO: Pending scans count in Fortify: ${jobsCount}"
-            return jobsCount
-        } catch (Exception e) {
-            println "ERROR: Failed to get Fortify pending jobs count: ${e.message}"
-            println "WARN: Defaulting to count = 0"
-            return 0
-        }
-    }
-}
-
-def sendTeamsNotification(def workflowUrl, def emailList, def teamName) {
-    try {
-        def emails = emailList instanceof List ? emailList : emailList.split(',')
-        def emailParams = ""
-        
-        emails.eachWithIndex { email, index ->
-            emailParams += "\"email${index + 1}\":\"${email.trim()}\","
-        }
-        
-        // Remove trailing comma
-        emailParams = emailParams.replaceAll(/,$/, '')
-        
-        def pipelineUrl = env.BUILD_URL ?: "Unknown"
-        
-        def payload = "{${emailParams},\"pipelineurl\":\"${pipelineUrl}\"}"
-        
-        println "INFO: ----------------------------------------"
-        println "INFO: Sending ${teamName} Teams notification..."
-        println "DEBUG: Workflow URL: ${workflowUrl}"
-        println "DEBUG: Payload: ${payload}"
-        
         def response = sh(
-            script: "curl -s -w 'HTTP_CODE=%{http_code}' -H 'Content-Type: application/json' -H 'Accept: application/json' -X POST '${workflowUrl}' -d '${payload}'",
+            script: """
+                curl -ks \\
+                -H "Authorization: FortifyToken ${FORTIFY_TOKEN}" \\
+                "${fortifyApiUrl}/cloudjobs?fields=jobState&q=jobState:PENDING"
+            """,
             returnStdout: true
         ).trim()
-        
-        println "DEBUG: ${teamName} notification response: ${response}"
-        
-        // Check if HTTP status code indicates success (2xx)
-        if (response.contains("HTTP_CODE=2")) {
-            println "INFO: ✓ ${teamName} notification sent SUCCESSFULLY"
-            println "INFO: ----------------------------------------"
-            return true
-        } else {
-            println "WARN: ✗ ${teamName} notification may have FAILED (non-2xx status)"
-            println "INFO: ----------------------------------------"
-            return false
-        }
-        
-    } catch (Exception e) {
-        println "ERROR: ✗ Failed to send ${teamName} notification: ${e.message}"
-        e.printStackTrace()
-        println "INFO: ----------------------------------------"
-        // Don't fail the pipeline if notification fails
-        return false
+
+        def json = readJSON(text: response)
+        def count = json?.count ?: 0
+
+        println "INFO: Pending scans reported by Fortify API: ${count}"
+        return count
     }
 }
