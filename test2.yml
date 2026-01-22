@@ -1,4 +1,17 @@
-
+Scenario 1: Always below threshold (No alerts)
+Counts: 3, 4, 5, 2
+Scenario 2: Cross threshold once (Single alert)
+Counts: 4, 5, 6, 6, 6
+Scenario 3: Above threshold then back to normal (Alert + Reset)
+Counts: 4, 6, 7, 5, 4
+Scenario 4: Alert again after reset (2 alerts total)
+Counts: 6, 7, 5, 6, 7
+Scenario 5: Edge case validation (Exactly threshold)
+Counts: 5, 5, 5, 6
+Scenario 6: Flapping around threshold (Multiple alerts possible)
+Counts: 6, 5, 6, 5, 6
+Scenario 7: Duplicate alert prevention (Continuous breach)
+Counts: 6, 8, 10, 9, 7
 
 second approach
 ================================================>>>>>>>>>>>>>>>>>>
