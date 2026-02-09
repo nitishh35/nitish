@@ -1,3 +1,107 @@
+Got it. You need a short, clean Confluence summary that explains what happened, why it happened, and what to fix — no noise, no emotions.
+You can paste the below as-is and adjust names if needed.
+
+
+---
+
+RC Tag Import Failure – Analysis Summary (Multi-Module Project)
+
+What Happened
+
+This is not a test case failure.
+
+In this multi-module build (3 modules):
+
+2 modules imported successfully into uDeploy.
+
+1 module (uDeploy component) failed during import due to component name mismatch in Jenkins configuration.
+
+
+Because one module failed:
+
+The Bitbucket RC tag creation stage did not execute (pipeline stops on stage failure).
+
+
+In the next build:
+
+Pipeline attempted to reuse the same RC version for the already-imported modules.
+
+uDeploy rejected the upload as the component version already exists, causing the build to fail again.
+
+
+
+
+---
+
+Root Cause
+
+Incorrect uDeploy component name configuration in Jenkins for one module.
+
+Partial import resulted in:
+
+RC tag not being created
+
+Version mismatch across modules in subsequent builds
+
+
+
+
+---
+
+Impact
+
+Partial artifact import into uDeploy
+
+RC tag missing in Bitbucket
+
+Subsequent builds blocked due to duplicate RC version conflicts
+
+
+
+---
+
+Resolution / Next Steps
+
+Correct the uDeploy component name configuration in Jenkins for the affected module.
+
+Ensure all modules import successfully before RC tag creation.
+
+Avoid reusing RC versions when partial imports exist.
+
+Update the DSE Pipeline Troubleshooting Guide under Tagging Issues to document this scenario.
+
+
+
+---
+
+Action Items
+
+Create a sub-task to fix Jenkins component configuration.
+
+Update analysis in the story.
+
+Update troubleshooting documentation:
+
+DSE Pipeline Troubleshooting Guide → Tagging Issues
+
+
+
+
+---
+
+If you want, I can:
+
+Make it even shorter (executive summary)
+
+Rewrite it in incident/post-mortem format
+
+Or tailor it exactly to your manager’s writing style
+
+
+Just tell me 👍
+
+_------------
+
 new code with lock
 
 
@@ -144,3 +248,4 @@ def getFortifyPendingJobsCount(def fortifyApiToken, def fortifyApiUrl) {
         return count
     }
 }
+
