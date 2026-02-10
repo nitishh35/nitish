@@ -1,251 +1,519 @@
-Got it. You need a short, clean Confluence summary that explains what happened, why it happened, and what to fix — no noise, no emotions.
-You can paste the below as-is and adjust names if needed.
+Perfect 👍
+Below is a Confluence-ready SOP followed by a clear execution checklist.
+This is written so that a new joiner or backup engineer can perform the entire decommissioning independently, even if you are on leave.
+
+You can copy–paste this directly into Confluence.
 
 
 ---
 
-RC Tag Import Failure – Analysis Summary (Multi-Module Project)
-
-What Happened
-
-This is not a test case failure.
-
-In this multi-module build (3 modules):
-
-2 modules imported successfully into uDeploy.
-
-1 module (uDeploy component) failed during import due to component name mismatch in Jenkins configuration.
+📘 SOP: Application Decommissioning – PCF / Jenkins / UCD / DevOps Tools
 
 
-Because one module failed:
+---
 
-The Bitbucket RC tag creation stage did not execute (pipeline stops on stage failure).
+1. Purpose
 
+This SOP describes the end-to-end process to safely decommission an application across all DevOps platforms, including PCF, Jenkins, CloudBees CD (UCD), Sonar, Infosec, and source code repositories.
 
-In the next build:
+This document ensures:
 
-Pipeline attempted to reuse the same RC version for the already-imported modules.
+No orphaned resources remain
 
-uDeploy rejected the upload as the component version already exists, causing the build to fail again.
+Production risk is minimized
 
+Compliance and audit requirements are met
+
+Any engineer can execute the steps without prior context
 
 
 
 ---
 
-Root Cause
+2. Scope
 
-Incorrect uDeploy component name configuration in Jenkins for one module.
+This SOP applies to:
 
-Partial import resulted in:
+Single-module applications
 
-RC tag not being created
+Multi-module applications
 
-Version mismatch across modules in subsequent builds
+Microservices
 
-
-
-
----
-
-Impact
-
-Partial artifact import into uDeploy
-
-RC tag missing in Bitbucket
-
-Subsequent builds blocked due to duplicate RC version conflicts
+Batch applications deployed on PCF
 
 
 
 ---
 
-Resolution / Next Steps
+3. Responsibility Matrix
 
-Correct the uDeploy component name configuration in Jenkins for the affected module.
+Role	Responsibility
 
-Ensure all modules import successfully before RC tag creation.
-
-Avoid reusing RC versions when partial imports exist.
-
-Update the DSE Pipeline Troubleshooting Guide under Tagging Issues to document this scenario.
-
-
-
----
-
-Action Items
-
-Create a sub-task to fix Jenkins component configuration.
-
-Update analysis in the story.
-
-Update troubleshooting documentation:
-
-DSE Pipeline Troubleshooting Guide → Tagging Issues
-
+App Owner	Provides approval for decommission
+Sphere / Dev Lead	Confirms app/module to be decommissioned
+DSE DevOps Team	Technical guidance & validation
+PCF Ops Team	PCF app, job, task & route removal
+Enterprise DevOps	UCD & CloudBees CD cleanup
+Infosec Team	Security system cleanup
 
 
 
 ---
 
-If you want, I can:
+4. Preconditions (Must Be Completed Before Starting)
 
-Make it even shorter (executive summary)
+✔ App owner approval email available
 
-Rewrite it in incident/post-mortem format
+✔ Confirmation of environments (Dev / Prod)
 
-Or tailor it exactly to your manager’s writing style
+✔ Confirmation if app is single-module or multi-module
 
-
-Just tell me 👍
-
-_------------
-
-new code with lock
+✔ Change Request raised for Production (if applicable)
 
 
 
+---
+
+5. Step-by-Step Decommissioning Procedure
+
+
+---
+
+Step 1: Remove PCF Application / Job / Task
+
+Applicability
+
+All PCF-deployed applications
+
+Mandatory for both Dev and Prod
+
+
+Actions
+
+1. Identify:
+
+App name
+
+Job name (for batch apps)
+
+Task name (for batch apps)
+
+Environments (Dev & Prod)
+
+
+
+2. Send email to pcf.appops@syf.com with:
+
+App name
+
+Job/task details
+
+Environment details
+
+App owner approval attached
+
+
+
+3. After confirmation:
+
+Verify the app is removed from PCF
+
+Verify routes are unbound and removed
+
+Check Routes section (left-hand panel) in PCF UI
 
 
 
 
+Validation
+
+✔ App not visible in PCF
+✔ Job/Task removed (if batch app)
+✔ Route unbound and deleted
+
+
+---
+
+Step 2: Decommission PCF Route / GTM
+
+
+---
+
+DEV Environment
+
+1. Send email to pcf.appops@syf.com with:
+
+App name
+
+Foundation details
+
+Route type (PCF route)
 
 
 
 
+✔ No change ticket required for Dev
+
+
+---
+
+PROD Environment
+
+1. Raise Change Request with:
+
+App owner approval attached
+
+GTM / PCF route removal details
+
+
+
+2. Reference sample change:
+
+CHG0861248
+
+
+
+3. After ticket approval:
+
+Notify PCF Ops team via email
 
 
 
 
+Validation
 
-def call(boolean checkOnTimeout = false) {
+✔ Route removed from PCF
+✔ GTM entry decommissioned
 
-    /* ---------------------------------------------------------
-       Load environment configuration
-    ---------------------------------------------------------- */
-    def envProperty = loadEnvironmentProperties()
 
-    def fortifyApiUrl             = envProperty.fortify_api_url
-    def fortifyApiToken           = envProperty.fortify_api_credential_id
-    def fortifyScanCountThreshold = envProperty.fortify_scan_count_threshold as Integer
-    def alertEnabled              = envProperty.fortify_alert_enabled as Boolean
+---
 
-    def devopsWorkflowUrl         = envProperty.devops_workflow_url
-    def fortifyWorkflowUrl        = envProperty.fortify_workflow_url
-    def devopsChannelEmails       = envProperty.to_email_address_list
-    def fortifyChannelEmails      = envProperty.fortify_team_emails
+Step 3: Jenkins Job Decommission
 
-    /* ---------------------------------------------------------
-       IMPORTANT: Use a GLOBAL state file (not workspace)
-    ---------------------------------------------------------- */
-    def alertStateFile = "/var/jenkins_home/fortify-alert-state/${env.JOB_NAME}.state"
 
-    if (!alertEnabled) {
-        println "INFO: Fortify alerts are disabled. Skipping alert evaluation."
-        return
-    }
+---
 
-    /* ---------------------------------------------------------
-       Get pending Fortify scan count
-    ---------------------------------------------------------- */
-    def fortifyScanCount = getFortifyPendingJobsCount(
-        fortifyApiToken,
-        fortifyApiUrl
-    )
+Single Module Application
 
-    println "INFO: Current Fortify pending scan count: ${fortifyScanCount}"
+1. Move Jenkins job to ARCHIVE location:
 
-    /* ---------------------------------------------------------
-       LOCKED SECTION – ONLY ONE BUILD AT A TIME
-    ---------------------------------------------------------- */
-    lock(resource: "fortify-alert-lock") {
 
-        /* ------------------ TIMEOUT PATH ------------------- */
-        if (checkOnTimeout) {
 
-            if (fortifyScanCount > fortifyScanCountThreshold) {
+Paths
 
-                boolean alertAlreadySent = false
+Dev: DSE-MICROSERVICES-DEV > ARCHIVE > TO_BE_DELETED
 
-                if (fileExists(alertStateFile)) {
-                    def state = readFile(alertStateFile).trim()
-                    alertAlreadySent = state.equalsIgnoreCase("true")
-                }
+Prod: DSE-MICROSERVICES-PROD > ARCHIVE > TO_BE_DELETED
 
-                if (!alertAlreadySent) {
 
-                    println "WARN: Fortify scan timed out and pending count " +
-                            "(${fortifyScanCount}) exceeded threshold " +
-                            "(${fortifyScanCountThreshold}). Sending alert."
+✔ Job is no longer active
 
-                    sendTeamsNotification(
-                        devopsWorkflowUrl,
-                        devopsChannelEmails,
-                        "DevOps"
-                    )
 
-                    sendTeamsNotification(
-                        fortifyWorkflowUrl,
-                        fortifyChannelEmails,
-                        "Fortify"
-                    )
+---
 
-                    writeFile(
-                        file: alertStateFile,
-                        text: "true\n"
-                    )
+Multi-Module Application
 
-                } else {
-                    println "INFO: Alert already sent. Suppressing duplicate."
-                }
+1. Open Jenkins job
 
-            } else {
-                println "INFO: Timeout occurred but pending count within threshold. No alert sent."
-            }
 
-            return
-        }
+2. Click Configure
 
-        /* ---------------- NON-TIMEOUT PATH ----------------- */
-        if (fortifyScanCount <= fortifyScanCountThreshold) {
 
-            println "INFO: Pending scans back within threshold. Resetting alert state."
+3. Remove decommissioned module from Deployable Modules
 
-            writeFile(
-                file: alertStateFile,
-                text: "false\n"
-            )
 
-        } else {
-            println "INFO: Pending scans exceeded threshold but no timeout. No alert sent."
-        }
-    }
-}
+4. Save configuration
 
-/* =========================================================
-   Fortify API – Pending scan count
-========================================================= */
-def getFortifyPendingJobsCount(def fortifyApiToken, def fortifyApiUrl) {
 
-    withCredentials([
-        string(credentialsId: fortifyApiToken, variable: 'FORTIFY_TOKEN')
-    ]) {
 
-        def response = sh(
-            script: """
-                curl -ks \\
-                -H "Authorization: FortifyToken ${FORTIFY_TOKEN}" \\
-                "${fortifyApiUrl}/cloudjobs?fields=jobState&q=jobState:PENDING"
-            """,
-            returnStdout: true
-        ).trim()
+✔ Remaining modules still deploy correctly
 
-        def json = readJSON(text: response)
-        def count = json?.count ?: 0
 
-        println "INFO: Pending scans reported by Fortify API: ${count}"
-        return count
-    }
-}
+---
 
+Step 4: Remove UDeploy (UCD) Configuration
+
+
+---
+
+Actions
+
+1. Raise RITM to DevOpsSupport@syf.com
+
+
+2. Provide:
+
+App name
+
+Component(s)
+
+Processes (Blue/Green/Rollback)
+
+Environment(s)
+
+Justification
+
+App owner approval attached
+
+
+
+
+Reference RITMs
+
+RITM2568465
+
+RITM2576827
+
+
+Validation
+
+✔ Components removed
+✔ App processes removed
+✔ No environment bindings remain
+
+
+---
+
+Step 5: Infosec Application Removal
+
+
+---
+
+Actions
+
+1. Raise RITM to Infosec App Team using Infosec portal
+
+
+2. Provide one of the following:
+
+Change Request number (PCF decommission), OR
+
+Jira story number (created by app team)
+
+
+
+
+Reference RITM
+
+RITM2577273
+
+
+Validation
+
+✔ App removed from Infosec systems
+
+
+---
+
+Step 6: SonarQube Application Removal
+
+
+---
+
+Actions
+
+1. Remove project from SonarQube
+
+
+2. Ensure no scheduled scans remain
+
+
+
+Validation
+
+✔ Sonar project no longer exists
+✔ No pipelines reference Sonar project
+
+
+---
+
+Step 7: CloudBees CD Self-Service Decommission
+
+
+---
+
+Actions
+
+1. Raise RITM to DevOpsSupport@syf.com
+
+
+2. Include:
+
+Microservice name
+
+Justification
+
+App owner approval
+
+
+
+
+Reference RITMs
+
+RITM2568465
+
+RITM2576827
+
+
+Validation
+
+✔ Self-service deployment disabled
+✔ App not visible in CloudBees CD
+
+
+---
+
+Step 8: Source Code Repository Cleanup
+
+
+---
+
+Single Module Repository
+
+1. Open repository
+
+
+2. Go to Repository Settings
+
+
+3. Scroll to Repository Details
+
+
+4. Click Archive
+
+
+
+⚠ Delete repository only after written app owner approval
+
+✔ Repo archived or deleted
+
+
+---
+
+Multi-Module Repository
+
+1. Remove code related to decommissioned module
+
+
+2. Ensure:
+
+Build files updated
+
+CI pipelines updated
+
+No references to removed module
+
+
+
+
+✔ Remaining modules build successfully
+
+
+---
+
+✅ FINAL DECOMMISSION CHECKLIST
+
+Use this checklist before closing the ticket.
+
+
+---
+
+PCF
+
+⬜ App removed (Dev)
+
+⬜ App removed (Prod)
+
+⬜ Job removed (Batch apps)
+
+⬜ Task removed (Batch apps)
+
+⬜ Routes removed
+
+
+
+---
+
+Routing / GTM
+
+⬜ Dev route removed
+
+⬜ Prod GTM removed
+
+⬜ Change Request approved
+
+
+
+---
+
+Jenkins
+
+⬜ Job archived (single module)
+
+⬜ Module removed from job (multi-module)
+
+
+
+---
+
+UCD / CloudBees
+
+⬜ Components removed
+
+⬜ App processes removed
+
+⬜ Self-service deployment disabled
+
+
+
+---
+
+Security & Quality
+
+⬜ Infosec entry removed
+
+⬜ Sonar project removed
+
+
+
+---
+
+Source Code
+
+⬜ Repo archived or deleted (single module)
+
+⬜ Module removed from repo (multi-module)
+
+⬜ Pipelines updated
+
+
+
+---
+
+Final Validation
+
+⬜ No active pipelines
+
+⬜ No production endpoints
+
+⬜ All approvals attached
+
+⬜ Tickets updated & closed
+
+
+
+---
+
+If you want, I can also:
+
+Add flow diagrams
+
+Create a one-page quick reference
+
+Convert this into a runbook + troubleshooting section
+
+Align it with audit / compliance language
+
+
+Just say the word 👍
