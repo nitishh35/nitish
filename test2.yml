@@ -789,4 +789,268 @@ If you want, I can next:
 ✅ show multi-module Spring Boot testing best practices
 ✅ provide CI-safe Spring Boot test template
 
+======={{}}{}{}{}{{×÷π√π÷××
 
+
+
+five reason 
+
+The error:
+
+IllegalStateException: No root application context located
+
+occurs in CI more often than locally because pipeline environments expose configuration, packaging, and classpath problems that IDE runs may mask.
+
+Below are 5 real-world causes seen in CI/CD pipelines (Jenkins, Azure DevOps, GitHub Actions), including why they happen and how to fix them.
+
+
+---
+
+🔴 1️⃣ Main Spring Boot Class Not Visible on Test Classpath
+
+✔ What happens
+
+Spring Boot cannot locate a class annotated with:
+
+@SpringBootApplication
+
+From your error:
+
+classes [com.syf.ecom.PartnerMfa]
+
+Spring expects this to be the root configuration.
+
+✔ Why it works locally but fails in CI
+
+IDE builds entire workspace
+
+CI builds module in isolation
+
+root module not included as dependency
+
+
+✔ Common CI scenario
+
+Multi-module Maven project
+
+parent
+ ├── api
+ ├── service
+ ├── web   ← tests run here
+
+If web module lacks dependency on module containing PartnerMfa, context fails.
+
+✔ Fix
+
+Add dependency in module running tests:
+
+<dependency>
+  <groupId>com.syf.ecom</groupId>
+  <artifactId>app-main</artifactId>
+</dependency>
+
+
+---
+
+🔴 2️⃣ Test Running in Wrong Module or Packaging Phase
+
+✔ What happens
+
+CI runs:
+
+mvn test
+
+inside a submodule that does not contain Spring Boot application class.
+
+✔ Pipeline misconfiguration example
+
+dir('controller-module') {
+    sh 'mvn test'
+}
+
+Root context unavailable.
+
+✔ Fix
+
+Run from root:
+
+mvn clean install
+
+OR ensure module dependency graph is correct.
+
+
+---
+
+🔴 3️⃣ Conflicting Test Context Annotations
+
+This is extremely common.
+
+❌ Problem pattern
+
+@WebMvcTest
+@ContextConfiguration
+@SpringBootTest
+
+CI loads merged context → root context missing → failure.
+
+✔ Why CI fails but local works
+
+Classpath order & context caching differ.
+
+✔ Fix
+
+Use ONE context strategy:
+
+Controller test:
+
+@WebMvcTest(Controller.class)
+@Import(TestConfig.class)
+
+Full context test:
+
+@SpringBootTest
+
+Avoid mixing.
+
+
+---
+
+🔴 4️⃣ Spring Boot Main Class Excluded by Build Profile
+
+✔ What happens
+
+CI uses:
+
+mvn test -Pprod
+
+Your main class may be excluded by profile filtering:
+
+<profiles>
+  <profile>
+    <id>prod</id>
+    <build>
+      <excludes>
+        <exclude>**/PartnerMfa.java</exclude>
+      </excludes>
+    </build>
+  </profile>
+</profiles>
+
+OR located in profile-specific source sets.
+
+✔ Fix
+
+Verify CI profile:
+
+mvn help:active-profiles
+
+Ensure main class is packaged.
+
+
+---
+
+🔴 5️⃣ Package Structure Breaks Component Scanning
+
+Spring Boot scans downward from main class package.
+
+✔ Required structure
+
+com.syf.ecom            ← main class
+com.syf.ecom.controller
+com.syf.ecom.service
+
+❌ CI failure scenario
+
+Main class moved:
+
+com.syf.boot.PartnerMfa
+
+Controllers in:
+
+com.syf.ecom.controller
+
+IDE finds beans; CI fails.
+
+✔ Fix
+
+Move main class to root package OR define scan:
+
+@SpringBootApplication(scanBasePackages = "com.syf.ecom")
+
+
+---
+
+🟡 BONUS: CI-ONLY Cause (Seen Frequently)
+
+🔸 Dependency shading / relocation
+
+When using:
+
+Spring Boot repackage
+
+shading plugins
+
+custom classloader packaging
+
+
+CI packaging may hide root config.
+
+Check:
+
+jar tf target/app.jar | grep PartnerMfa
+
+
+---
+
+⚡ Quick CI Debug Commands
+
+Run inside Jenkins workspace:
+
+Verify class exists
+
+find . -name "PartnerMfa.class"
+
+Check jar contents
+
+jar tf target/*.jar | grep PartnerMfa
+
+Check module dependencies
+
+mvn dependency:tree
+
+
+---
+
+🧠 Why This Error Appears More in CI
+
+Cause	Local	CI
+
+full workspace build	✔	❌
+cached context	✔	❌
+IDE classpath magic	✔	❌
+profiles	❌	✔
+module isolation	❌	✔
+
+
+
+---
+
+🎯 Most Likely Causes in Your Case
+
+Based on your stacktrace:
+
+✅ 1. root app class not visible to test module
+
+✅ 2. conflicting context annotations
+
+✅ 3. module build path issue
+
+
+---
+
+If you want, I can next:
+
+✅ analyze your Maven module structure
+✅ give exact annotation combo to use
+✅ show multi-module Spring Boot testing best practices
+✅ provide CI-safe Spring Boot test template
