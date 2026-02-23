@@ -1,519 +1,252 @@
-Scenario 1: Always below threshold (No alerts)
-Counts: 3, 4, 5, 2
-Scenario 2: Cross threshold once (Single alert)
-Counts: 4, 5, 6, 6, 6
-Scenario 3: Above threshold then back to normal (Alert + Reset)
-Counts: 4, 6, 7, 5, 4
-Scenario 4: Alert again after reset (2 alerts total)
-Counts: 6, 7, 5, 6, 7
-Scenario 5: Edge case validation (Exactly threshold)
-Counts: 5, 5, 5, 6
-Scenario 6: Flapping around threshold (Multiple alerts possible)
-Counts: 6, 5, 6, 5, 6
-Scenario 7: Duplicate alert prevention (Continuous breach)
-Counts: 6, 8, 10, 9, 7
+You are seeing intermittent build failures in a multi-module Maven Jenkins job with the error:
 
-second approach
-================================================>>>>>>>>>>>>>>>>>>
-fortifyscan
-def call(def jdkTool = null, def fortifyAppName, def gitProjectKey, def gitRepositoryName, def gitPullRequestId, def fortifyVersion, def gitBranch) {
+[ERROR] AlternateAuthMfaControllerTest ? IllegalState
+Failed to load ApplicationContext
+@WebMergedContextConfiguration
 
-    def envProperty = loadEnvironmentProperties()
-    def jdkVersion = jdkTool ?: envProperty.default_jdk
-    def mavenTool = envProperty.maven_tool
-    def gradleTool = envProperty.gradle_tool
-    def nexusRepoGroupUrl = envProperty.nexus_repo_group_url
-    def nexusRepoCredential = envProperty.nexus_repo_auth_credential_id
-    def fortifyScancentralURL = envProperty.fortify_scancentral_url
-    def fortifyApiURL = envProperty.fortify_api_url
-    def fortifyWebURL = envProperty.fortify_web_url
-    def fortifyApiToken = envProperty.fortify_api_credential_id
-    def fortifyUploadToken = envProperty.fortify_upload_credential_id
-    def fortifyScancentralExecutablePath = envProperty.fortify_scancentral_path_current
-    def fortifyTimeout = envProperty.fortify_timeout as Integer
-    def fortifyTimeoutUnits = envProperty.fortify_timeout_units
+This is a Spring Boot test context initialization failure, not a compilation issue.
 
-    println "INFO: Fortify scan timeout value and units: ${fortifyTimeout}-${fortifyTimeoutUnits}"
+Because it passes sometimes and fails other times, this points to environmental / test isolation / resource contention problems, which are common in CI pipelines.
 
-    try {
-        timeout(time: fortifyTimeout, unit: fortifyTimeoutUnits) {
-
-            if (env.pipelineEnv.equals('prod') && (env.fortifyEngineUpgradeFlag.equalsIgnoreCase('yes'))) {
-                println "INFO: Fortify scan engine new version selected ${env.fortifyEngineUpgradeFlag}"
-                fortifyScancentralExecutablePath = envProperty.fortify_scancentral_path_new
-            }
-
-            println "INFO: Fortify scancentral executable path selected ${fortifyScancentralExecutablePath}"
-
-            def fortifyScanId = getFortifyProjectScanId(fortifyApiToken, fortifyApiURL, fortifyAppName, fortifyVersion)
-            def fortifyArtifactId = getFortifyArtifactId(fortifyApiToken, fortifyApiURL, fortifyScanId)
-
-            if (fortifyArtifactId != null) {
-                def lastbuildEngineVersion = getLastBuildUsedEngineVersion(fortifyApiToken, fortifyApiURL, fortifyArtifactId)
-                if (lastbuildEngineVersion != null) {
-                    def fortifyVersionSelected = getForifyVersionFromExecutablePath(fortifyScancentralExecutablePath)
-                    if (fortifyVersionSelected < lastbuildEngineVersion) {
-                        buildFailed("The previous Fortify scan was performed using a newer Fortify engine version ${lastbuildEngineVersion} and reverting to an older version ${fortifyVersionSelected} is not allowed. Please select the newer Fortify engine version to proceed.")
-                    }
-                }
-            }
-
-            withEnv(["JAVA_HOME=${tool jdkVersion}", "PATH+JAVA=${tool jdkVersion}/bin", "PATH+MAVEN=${tool jdkVersion}/bin:${tool mavenTool}/bin", "PATH+GRADLE=${tool jdkVersion}/bin:${tool gradleTool}/bin"]) {
-                withCredentials([usernamePassword(credentialsId: nexusRepoCredential, usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD'),
-                                string(credentialsId: fortifyUploadToken, variable: 'credentials')]) {
-
-                    def fortifyScanOptions = getFortifyScanOptions(nexusRepoGroupUrl, nexusRepoCredential, gitRepositoryName, fortifyUploadToken)
-                    def fortifyScanCommand = "${fortifyScancentralExecutablePath} -url ${fortifyScancentralURL} start -bt ${fortifyScanOptions} -upload -uptoken ${credentials} -application ${fortifyAppName} -version ${fortifyVersion} -block -f ${gitRepositoryName}.fpr"
-
-                    sh "${fortifyScanCommand}"
-                }
-            }
-
-            def issuesResponseContent = getIssuesResponse(fortifyApiToken, fortifyApiURL, fortifyScanId)
-            def fortifyResultStr = ""
-
-            if (issuesResponseContent.count > 0) {
-                fortifyResultStr = "Fortify Issues Summary: \\n\\n CATEGORY | CRITICALITY | DEVELOPER STATUS | FILENAME \\n\\n"
-                issuesResponseContent.data.each { key, value ->
-                    if (((key.friority).startsWith('Critical') || (key.friority).startsWith('High'))) {
-                        if ((key.primaryTag).equals(null) || (key.primaryTag) == null || (key.primaryTag).toString() == 'null') {
-                            fortifyResultStr += key.issueName + " | " + key.friority + " | NA | " + key.fullFileName + " \\n"
-                        } else {
-                            fortifyResultStr += key.issueName + " | " + key.friority + " | " + key.primaryTag + " | " + key.fullFileName + " \\n"
-                        }
-                    }
-                }
-            } else {
-                fortifyResultStr = 'No issues were identified during the Fortify scan.'
-            }
-
-            def reportLink = "View Fortify report at ${fortifyWebURL}/ssc/version/${fortifyScanId}/audit"
-            println "INFO: The Fortify report link: ${reportLink}"
-
-            if (gitPullRequestId != 'NA') {
-                def jenkinsJobURL = "Jenkins Job: " + env.BUILD_URL
-                def fortifyResultText = """{"text": "${jenkinsJobURL} \\n\\n ${reportLink} \\n\\n ${fortifyResultStr}"}"""
-                postBitbucketPrComment(gitProjectKey, gitRepositoryName, gitPullRequestId, fortifyResultText)
-            } else {
-                println "INFO: The Fortify result value: ${fortifyResultStr}"
-            }
-
-            def (issuesResponseGroupCritical, issuesResponseGroupHigh) = getFortifyIssuesByGroup(fortifyApiToken, fortifyApiURL, fortifyScanId)
-            def failBuild = false
-
-            if (issuesResponseGroupCritical > 0 || issuesResponseGroupHigh > 0) {
-                failBuild = true
-            }
-
-            def fortifySkip = checkForFortifySkip(fortifyVersion, gitRepositoryName)
-
-            if (fortifySkip.equalsIgnoreCase('N')) {
-                if (issuesResponseContent.data != null) {
-                    if (issuesResponseContent.count > 0) {
-                        issuesResponseContent.data.each { key, value ->
-                            if (((key.friority).startsWith('Critical') || (key.friority).startsWith("High")) && ((fortifyVersion.equalsIgnoreCase('PROD') && failBuild) || (fortifyVersion.equalsIgnoreCase('DEV') && ((key.primaryTag).equals(null) || (key.primaryTag) == null || (key.primaryTag).toString() == 'null')))) {
-                                buildFailed("Vulnerabilities have been identified by the Fortify scan. \nAction Required: Please review the details in the analysis report using the link provided and address the reported issues. \nFortify Report: ${reportLink}")
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        
-        // Scan completed successfully - reset alert state if count is now within threshold
-        println "INFO: Fortify scan completed successfully. Checking alert state..."
-        managefortifyalertsstate(false)
-        
-    } catch (org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e) {
-        // Timeout occurred - send alert if BOTH conditions met:
-        // 1. Timeout occurred (we're here)
-        // 2. Pending count > threshold (checked inside function)
-        println "ERROR: Fortify scan timed out: ${e.message}"
-        managefortifyalertsstate(true)
-        
-        // Re-throw to fail the build
-        throw e
-    }
-}
-
-// Helper functions below...
-
-def getFortifyProjectScanId(def fortifyApiToken, def fortifyApiURL, def fortifyAppName, def fortifyVersion) {
-    withCredentials([string(credentialsId: fortifyApiToken, variable: 'credentials')]) {
-        def projectResponse = sh(script: "curl -ksH 'Authorization: FortifyToken ${credentials}' '${fortifyApiURL}/projects?q=name:${fortifyAppName}'", returnStdout: true).trim()
-        def projectData = readJSON text: projectResponse
-
-        if (projectData.responseCode != 200) {
-            buildFailed("Failed to retrieve Fortify project id: ${projectData}")
-        }
-
-        fortifyProjectId = projectData.data[0].id
-        println "INFO: Fortify project id for this app: ${fortifyProjectId}"
-
-        def scanResponse = sh(script: "curl -ksH 'Authorization: FortifyToken ${credentials}' '${fortifyApiURL}/projects/${fortifyProjectId}/versions?q=name:${fortifyVersion}'", returnStdout: true).trim()
-        def scanData = readJSON text: scanResponse
-
-        if (scanData.responseCode != 200) {
-            buildFailed("Failed to retrieve Fortify scan id: ${scanData}")
-        }
-
-        fortifyScanId = scanData.data[0].id
-        println "INFO: Fortify scan id for this analysis: ${fortifyScanId}"
-        return fortifyScanId
-    }
-}
-
-def getFortifyArtifactId(def fortifyApiToken, def fortifyApiURL, def fortifyScanId) {
-    withCredentials([string(credentialsId: fortifyApiToken, variable: 'credentials')]) {
-        def artifactsResponse = sh(script: "curl -ksH 'Authorization: FortifyToken ${credentials}' '${fortifyApiURL}/projectVersions/${fortifyScanId}/artifacts'", returnStdout: true).trim()
-        def artifactsData = readJSON text: artifactsResponse
-        def fortifyArtifactId = null
-
-        if (artifactsData.responseCode != 200) {
-            buildFailed("Failed to retrieve Fortify artifacts details: ${artifactsData}")
-        }
-
-        if (artifactsData.data && artifactsData.data.size() > 0) {
-            fortifyArtifactId = artifactsData.data[0].id
-        } else {
-            println "WARN: No artifacts were found for specified Fortify scan id: ${fortifyScanId}"
-        }
-
-        println "INFO: Fortify artifact id for this analysis: ${fortifyArtifactId}"
-        return fortifyArtifactId
-    }
-}
-
-def getLastBuildUsedEngineVersion(fortifyApiToken, fortifyApiURL, fortifyArtifactId) {
-    withCredentials([string(credentialsId: fortifyApiToken, variable: 'credentials')]) {
-        def artifactResponse = sh(script: "curl -ksH 'Authorization: FortifyToken ${credentials}' '${fortifyApiURL}/artifacts/${fortifyArtifactId}/scans'", returnStdout: true).trim()
-        def artifactScanData = readJSON text: artifactResponse
-        def extractedLastBuildUsedEngineVersion = null
-
-        if (artifactScanData.responseCode != 200) {
-            buildFailed("Failed to retrieve Fortify artifact id: ${artifactScanData}")
-        }
-
-        if (artifactScanData.data && artifactScanData.data.size() > 0) {
-            extractedLastBuildUsedEngineVersion = "${artifactScanData.data[0].engineVersion.tokenize('.')[0]}.${artifactScanData.data[0].engineVersion.tokenize('.')[1]}" as BigDecimal
-        } else {
-            println "WARN: No artifact scans were found for specified Fortify artifact id: ${fortifyArtifactId}"
-        }
-
-        println "INFO: Fortify engine version used for previous build: ${extractedLastBuildUsedEngineVersion}"
-        return extractedLastBuildUsedEngineVersion
-    }
-}
-
-def getForifyVersionFromExecutablePath(def fortifyScancentralExecutablePath) {
-    def selectedFortifyVersion = sh(script: "${fortifyScancentralExecutablePath} -v | grep 'ScanCentral version:' | cut -d':' -f2 | cut -d'.' -f1,2", returnStdout: true).trim() as BigDecimal
-    println "INFO: Fortify Version selected for current analysis: ${selectedFortifyVersion}"
-    return selectedFortifyVersion
-}
-
-def getIssuesResponse(def fortifyApiToken, def fortifyApiURL, def fortifyScanId) {
-    withCredentials([string(credentialsId: fortifyApiToken, variable: 'credentials')]) {
-        def issuesResponse = sh(script: "curl -ksH 'Authorization: FortifyToken ${credentials}' '${fortifyApiURL}/projectVersions/${fortifyScanId}/issues'", returnStdout: true).trim()
-        def issuesResponseContent = readJSON text: issuesResponse
-        
-        if (issuesResponseContent.responseCode != 200) {
-            buildFailed("Failed to retrieve scan issues from Fortify: ${issuesResponseContent}")
-        }
-        
-        return issuesResponseContent
-    }
-}
-
-def getFortifyIssuesByGroup(def fortifyApiToken, def fortifyApiURL, def fortifyScanId) {
-    withCredentials([string(credentialsId: fortifyApiToken, variable: 'credentials')]) {
-        def issuesResponseGroup = sh(script: """curl -ksH 'Authorization: FortifyToken ${credentials}' '${fortifyApiURL}/projectVersions/${fortifyScanId}/issueGroups?groupingtype=FOLDER&limit=0&showhidden=false&showremoved=false&showsuppressed=false'""", returnStdout: true).trim()
-        
-        def issuesResponseGroupCritical = sh(script: "jq -r 'if contains({data: [{id: \"Critical\"}]}) == true then .data[]|select(.id == \"Critical\").visibleCount else \"0\" end' <<<'${issuesResponseGroup}'", returnStdout: true).trim() as Integer
-        
-        def issuesResponseGroupHigh = sh(script: "jq -r 'if contains({data: [{id: \"High\"}]}) == true then .data[]|select(.id == \"High\")|.visibleCount else \"0\" end' <<<'${issuesResponseGroup}'", returnStdout: true).trim() as Integer
-        
-        println "INFO: Fortify issue count group by critical: ${issuesResponseGroupCritical}"
-        println "INFO: Fortify issue count group by high: ${issuesResponseGroupHigh}"
-        
-        return [issuesResponseGroupCritical, issuesResponseGroupHigh]
-    }
-}
-
-def getFortifyScanOptions(def nexusRepoGroupUrl, def nexusRepoCredential, def gitRepositoryName, def fortifyUploadToken) {
-    if (getAppBuildType().equals("maven")) {
-        fortifyOptions = "mvn -bc -V -B -e"
-    } else if (getAppBuildType().equals("gradle")) {
-        if (fileExists('gradlew')) {
-            sh 'rm -f gradlew'
-        }
-        sh 'gradle -v'
-        fortifyOptions = "gradle -bc --init-script init.gradle -Dnexus_url=${nexusRepoGroupUrl} -Dnexus_username=\$USERNAME -Dnexus_password=\$PASSWORD -g /appbin/install/Gradle_Cache/${gitRepositoryName} -exclude '**/.git/***'"
-    } else if (getAppBuildType().equals("static")) {
-        sh 'java -version'
-        fortifyOptions = "none -exclude '**/.git/***'"
-    }
-    
-    return fortifyOptions
-}
-```
 
 ---
 
-## **COMPLETE FLOW EXPLANATION**
+🎯 What this error means
 
-### **Design Logic (As Per Your Requirements)**
+Spring Boot failed to start the test application context required for:
 
-| Condition | Action |
-|-----------|--------|
-| Timeout + count > threshold + **not notified** | ✅ Send alert |
-| Timeout + count > threshold + **already notified** | ❌ Skip alert |
-| **No timeout** (any count) | ❌ **Never send alert** |
-| Count ≤ threshold (any run) | Reset alert state to `false` |
+AlternateAuthMfaControllerTest
+
+This happens before the test runs, during context bootstrapping.
+
+The test uses:
+
+@WebMvcTest / @SpringBootTest
+ApplicationTestConfiguration
+CommonTestConfiguration
+
+So Spring is attempting to load beans and dependencies.
+
 
 ---
 
-### **Flow Scenarios**
+⚠️ Why it fails intermittently in Jenkins (but works locally)
 
-**Assuming threshold = 6**
+✅ 1️⃣ Parallel module execution (MOST COMMON)
 
-#### **Scenario 1: First timeout with high count**
-```
-Job 1: Count=7, Timeout=YES
-├─ fortifyscan.groovy catches FlowInterruptedException
-├─ Calls: managefortifyalertsstate(true)
-├─ managefortifyalertsstate checks:
-│  ├─ checkOnTimeout = true ✓
-│  ├─ count (7) > threshold (6) ✓
-│  ├─ alertStateFile doesn't exist or = "false"
-│  ├─ ACTION: Send alerts to DevOps and Fortify teams
-│  └─ Write alertStateFile = "true"
-└─ Build fails due to timeout
-```
+Maven multi-module builds often run tests in parallel:
 
-#### **Scenario 2: No timeout, count still high**
-```
-Job 2: Count=8, Timeout=NO (scan completes)
-├─ fortifyscan.groovy completes successfully
-├─ Calls: managefortifyalertsstate(false) in finally block
-├─ managefortifyalertsstate checks:
-│  ├─ checkOnTimeout = false
-│  ├─ count (8) > threshold (6)
-│  ├─ ACTION: No action, preserve alert state
-│  └─ alertStateFile remains = "true"
-└─ Build succeeds
-```
+mvn clean install -T 1C
 
-#### **Scenario 3: Timeout again, count still high (YOUR ISSUE)**
-```
-Job 3: Count=8, Timeout=YES
-├─ fortifyscan.groovy catches FlowInterruptedException
-├─ Calls: managefortifyalertsstate(true)
-├─ managefortifyalertsstate checks:
-│  ├─ checkOnTimeout = true ✓
-│  ├─ count (8) > threshold (6) ✓
-│  ├─ alertStateFile = "true" (already notified)
-│  ├─ ACTION: Skip duplicate alert ✓
-│  └─ Log: "Alert already sent for timeout with high pending count. Skipping duplicate notification."
-└─ Build fails due to timeout
-```
+or Jenkins parallel stages.
 
-#### **Scenario 4: No timeout, count back to normal**
-```
-Job 4: Count=5, Timeout=NO (scan completes)
-├─ fortifyscan.groovy completes successfully
-├─ Calls: managefortifyalertsstate(false)
-├─ managefortifyalertsstate checks:
-│  ├─ checkOnTimeout = false
-│  ├─ count (5) ≤ threshold (6) ✓
-│  ├─ ACTION: Reset alert state
-│  └─ Write alertStateFile = "false"
-└─ Build succeeds
-```
+This causes:
 
-#### **Scenario 5: Timeout again after reset**
-```
-Job 5: Count=8, Timeout=YES
-├─ fortifyscan.groovy catches FlowInterruptedException
-├─ Calls: managefortifyalertsstate(true)
-├─ managefortifyalertsstate checks:
-│  ├─ checkOnTimeout = true ✓
-│  ├─ count (8) > threshold (6) ✓
-│  ├─ alertStateFile = "false" (state was reset)
-│  ├─ ACTION: Send alerts again ✓
-│  └─ Write alertStateFile = "true"
-└─ Build fails due to timeout
+port conflicts
 
-=========================>>>
+shared static state collision
 
-managefortifyalertsstate - claude
-def call(boolean checkOnTimeout = false) {
-    def envProperty = loadEnvironmentProperties()
-    def fortifyApiUrl = envProperty.fortify_api_url
-    def fortifyApiToken = envProperty.fortify_api_credential_id
-    def alertStateFile = envProperty.fortify_alert_state_file
-    def fortifyScanCountThreshold = envProperty.fortify_scan_count_threshold as Integer
-    def alertEnabled = envProperty.fortify_alert_enabled as Boolean
-    def devopsWorkflowUrl = envProperty.devops_workflow_url
-    def fortifyWorkflowUrl = envProperty.fortify_workflow_url
-    def devopsChannelEmails = envProperty.to_email_address_list
-    def fortifyChannelEmails = envProperty.fortify_team_emails
-    
-    if (!alertEnabled) {
-        println "INFO: Fortify alerts disabled. Skipping alert evaluation."
-        return
-    }
-    
-    // Get current pending count
-    def fortifyScanCount = getFortifyPendingJobsCount(fortifyApiToken, fortifyApiUrl)
-    
-    if (checkOnTimeout) {
-        // TIMEOUT PATH: Only evaluate alerts when timeout occurs
-        if (fortifyScanCount > fortifyScanCountThreshold) {
-            // Check if alert already sent
-            def notified = false
-            if (fileExists(alertStateFile)) {
-                def content = readFile(alertStateFile).trim()
-                println "DEBUG: Alert state file content: '${content}'"
-                if (content.equalsIgnoreCase("true")) {
-                    notified = true
-                    println "DEBUG: Alert already sent flag set to true"
-                }
-            } else {
-                println "DEBUG: Alert state file does not exist"
-            }
-            
-            // Send alert only if not already sent
-            if (!notified) {
-                println "WARN: Fortify scan timed out AND pending count (${fortifyScanCount}) exceeded threshold (${fortifyScanCountThreshold}). Sending alert."
-                sendTeamsNotification(devopsWorkflowUrl, devopsChannelEmails, "DevOps")
-                sendTeamsNotification(fortifyWorkflowUrl, fortifyChannelEmails, "Fortify")
-                writeFile(file: alertStateFile, text: "true")
-                println "DEBUG: Alert state file written with value 'true'"
-            } else {
-                println "INFO: Alert already sent for timeout with high pending count. Skipping duplicate notification."
-            }
-        } else {
-            println "INFO: Fortify scan timed out but pending count (${fortifyScanCount}) is within threshold (${fortifyScanCountThreshold}). No alert sent."
-            writeFile(file: alertStateFile, text: "false")
-        }
-    } else {
-        // NON-TIMEOUT PATH: Never send alerts, only reset state when count <= threshold
-        if (fortifyScanCount <= fortifyScanCountThreshold) {
-            println "INFO: Pending scans count (${fortifyScanCount}) within threshold (${fortifyScanCountThreshold}). Resetting alert state."
-            writeFile(file: alertStateFile, text: "false")
-        } else {
-            println "INFO: Pending scans count (${fortifyScanCount}) exceeds threshold (${fortifyScanCountThreshold}). No action taken (non-timeout path)."
-            // Do NOT modify alert state file - preserve existing state
-        }
-    }
-}
+embedded server clashes
 
-def getFortifyPendingJobsCount(def fortifyApiToken, def fortifyApiUrl) {
-    withCredentials([string(credentialsId: fortifyApiToken, variable: 'credentials')]) {
-        def scanResponse = sh(
-            script: "curl -ksH 'Authorization: FortifyToken ${credentials}' '${fortifyApiUrl}/cloudjobs?fields=jobState&q=jobState:PENDING'",
-            returnStdout: true
-        ).trim()
-        def jsonResponse = readJSON(text: scanResponse)
-        def jobsCount = jsonResponse.count ?: 0
-        println "INFO: Pending scans count in Fortify: ${jobsCount}"
-        return jobsCount
-    }
-}
+test context reuse issues
 
---------------
-managefortifyalertstate - chagpt
-def call(boolean checkOnTimeout = false) {
 
-    def envProperty = loadEnvironmentProperties()
+✔ Works sometimes
+❌ fails when timing conflicts occur
 
-    def fortifyApiUrl             = envProperty.fortify_api_url
-    def fortifyApiToken           = envProperty.fortify_api_credential_id
-    def alertStateFile            = envProperty.fortify_alert_state_file
-    def fortifyScanCountThreshold = envProperty.fortify_scan_count_threshold as Integer
+✔ FIX
 
-    def alertEnabled = envProperty.fortify_alert_enabled?.toBoolean()
-    if (!alertEnabled) {
-        println "INFO: Fortify alerts disabled. Skipping alert evaluation."
-        return
-    }
+Disable parallel test execution:
 
-    def devopsWorkflowUrl     = envProperty.devops_workflow_url
-    def fortifyWorkflowUrl    = envProperty.fortify_workflow_url
-    def devopsChannelEmails  = envProperty.to_email_address_list
-    def fortifyChannelEmails = envProperty.fortify_team_emails
+mvn clean install -T 1
 
-    // Get current pending scan count
-    def fortifyScanCount = getFortifyPendingJobsCount(fortifyApiToken, fortifyApiUrl)
+or in Surefire plugin:
 
-    println "INFO: Fortify pending scan count = ${fortifyScanCount}"
-    println "INFO: Fortify scan threshold     = ${fortifyScanCountThreshold}"
-    println "INFO: Timeout evaluation flag    = ${checkOnTimeout}"
+<parallel>none</parallel>
 
-    // -------- READ ALERT STATE ONCE --------
-    def notified = false
-    if (fileExists(alertStateFile)) {
-        def content = readFile(alertStateFile).trim()
-        println "DEBUG: Alert state file content = '${content}'"
-        if (content.equalsIgnoreCase("true")) {
-            notified = true
-        }
-    } else {
-        println "DEBUG: Alert state file does not exist"
-    }
 
-    println "INFO: Alert already sent = ${notified}"
+---
 
-    // -------- TIMEOUT PATH --------
-    if (checkOnTimeout) {
+✅ 2️⃣ Port conflict (embedded server)
 
-        if (fortifyScanCount > fortifyScanCountThreshold) {
+If tests start embedded servers (Tomcat/Jetty):
 
-            if (!notified) {
-                println "WARN: Timeout occurred AND pending count exceeded threshold. Sending alert."
+multiple modules may try same port (8080)
 
-                sendTeamsNotification(devopsWorkflowUrl, devopsChannelEmails, "DevOps")
-                sendTeamsNotification(fortifyWorkflowUrl, fortifyChannelEmails, "Fortify")
 
-                writeFile(file: alertStateFile, text: "true\n")
-                println "DEBUG: Alert state set to true"
-            } else {
-                println "INFO: Alert already sent for this incident. Skipping duplicate notification."
-            }
+✔ FIX
 
-        } else {
-            // Timeout occurred but system has recovered
-            println "INFO: Timeout occurred but pending count is within threshold. Resetting alert state."
-            writeFile(file: alertStateFile, text: "false\n")
-        }
+Use random port:
 
-        return
-    }
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 
-    // -------- NON-TIMEOUT PATH --------
-    // Reset ONLY when system recovers
-    if (fortifyScanCount <= fortifyScanCountThreshold && notified) {
-        println "INFO: Pending count back to normal. Resetting alert state."
-        writeFile(file: alertStateFile, text: "false\n")
-    } else {
-        println "INFO: No alert state change in non-timeout run."
-    }
-}
+or
 
-def getFortifyPendingJobsCount(def fortifyApiToken, def fortifyApiUrl) {
+server.port=0
 
-    withCredentials([string(credentialsId: fortifyApiToken, variable: 'credentials')]) {
 
-        def scanResponse = sh(
-            script: "curl -ksH 'Authorization: FortifyToken ${credentials}' '${fortifyApiUrl}/cloudjobs?fields=jobState&q=jobState:PENDING'",
-            returnStdout: true
-        ).trim()
+---
 
-        def jsonResponse = readJSON(text: scanResponse)
-        def jobsCount = jsonResponse.count ?: 0
+✅ 3️⃣ Test context caching collision
 
-        println "INFO: Pending scans count in Fortify: ${jobsCount}"
-        return jobsCount
-    }
-}
+Spring caches contexts between tests. In CI parallel runs, cache reuse can break.
 
+✔ FIX
+
+Add:
+
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
+
+Use only where needed.
+
+
+---
+
+✅ 4️⃣ Missing mock dependencies
+
+If controller test loads full context and required beans are missing:
+
+NoSuchBeanDefinitionException
+BeanCreationException
+
+It may fail based on test execution order.
+
+✔ FIX
+
+Use mocks:
+
+@MockBean
+private SomeService service;
+
+
+---
+
+✅ 5️⃣ Database / TestContainers / external dependency timing
+
+If test requires:
+
+DB connection
+
+Testcontainers
+
+Vault/secrets
+
+config server
+
+
+CI environment timing may cause failure.
+
+✔ Check logs for:
+
+Connection refused
+Timeout
+Cannot connect
+
+
+---
+
+✅ 6️⃣ Shared static state between tests
+
+Static variables cause nondeterministic failures.
+
+Avoid:
+
+static Map cache = new HashMap();
+
+
+---
+
+✅ 7️⃣ Insufficient Jenkins agent memory
+
+Spring Boot context startup is memory intensive.
+
+Intermittent failure may show:
+
+OutOfMemoryError
+GC overhead limit exceeded
+
+✔ Increase memory:
+
+MAVEN_OPTS="-Xmx1024m"
+
+
+---
+
+🔍 Why this happens only in multi-module jobs
+
+Multi-module builds introduce:
+
+✔ concurrent test execution
+✔ shared JVM resources
+✔ context caching conflicts
+✔ port & resource contention
+
+
+---
+
+🧪 Quick debugging steps (high value)
+
+Step 1 — Run failing module alone in Jenkins
+
+mvn -pl <module-name> test
+
+If it passes → concurrency issue.
+
+
+---
+
+Step 2 — Disable parallel build temporarily
+
+mvn clean install -T 1
+
+
+---
+
+Step 3 — Re-run failing test only
+
+mvn -Dtest=AlternateAuthMfaControllerTest test
+
+
+---
+
+Step 4 — Enable full stack trace
+
+mvn test -e -X
+
+
+---
+
+🧾 How to explain to your manager
+
+Root cause:
+The failure is caused by Spring Boot test context initialization errors during multi-module parallel execution in Jenkins. Resource conflicts and test context isolation issues cause intermittent failures.
+
+Why intermittent:
+When modules run concurrently, shared resources (ports, context cache, beans, memory) occasionally conflict, causing context startup failure.
+
+Resolution plan:
+
+1. Disable parallel test execution or isolate resources.
+
+
+2. Configure random ports for embedded servers.
+
+
+3. Mock required dependencies in controller tests.
+
+
+4. Ensure test context isolation and remove shared state.
+
+
+
+
+---
+
+If you want, I can next:
+
+✅ pinpoint likely issue from test annotation
+✅ show corrected controller test template
+✅ suggest CI-safe Spring Boot test design
+✅ provide Jenkins + Maven stability best practices
+
+Just share the test class or pom config.
