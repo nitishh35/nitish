@@ -1,306 +1,262 @@
+Below is a well-structured Confluence documentation page that developers can use to understand AI Assistance for Bitbucket Pull Request Reviews. The structure follows typical engineering documentation standards used in DevOps teams.
 
-PR-Agent Usage Guide for Developers (Bitbucket)
+
+---
+
+AI Assistance for Bitbucket Pull Request Reviews
 
 Overview
 
-PR-Agent is an AI-powered tool integrated with Bitbucket Pull Requests to assist developers with automated code review, PR summarization, security analysis, and code improvement suggestions.
+AI-powered Pull Request (PR) review tools enhance the developer experience by providing automated code analysis, suggestions, and review insights directly within Bitbucket Pull Requests. These tools help developers improve code quality, detect security issues early, and accelerate the review process.
 
-This tool helps developers receive instant feedback on Pull Requests (PRs) before manual review, improving code quality and reducing review time.
-
-This page explains how developers can use PR-Agent commands after creating a Pull Request.
+By integrating AI with Bitbucket PR workflows, development teams can automate repetitive review tasks and focus on higher-level design and architectural improvements.
 
 ---
 
-When to Use PR-Agent
+Objectives
 
-After raising a Pull Request in Bitbucket, developers can interact with PR-Agent through PR comments.
+The primary objectives of integrating AI into Bitbucket PR reviews include:
 
-PR-Agent analyzes the PR and provides insights such as:
-
-- Code review suggestions
-- Security vulnerability detection
-- Code improvement recommendations
-- PR summaries
-- Test generation suggestions
-
----
-
-Available PR-Agent Commands
-
-1. Generate PR Summary
-
-Command:
-
-/describe
-
-Purpose:
-
-Generates a clear summary of the Pull Request including:
-
-- Description of code changes
-- List of impacted files
-- Functional impact of the changes
-
-Example Output:
-
-PR Summary
-• Added new client strategy mapping logic
-• Updated ClientInfoConfig to dynamically fetch strategy based on clientId
-• Refactored SQL query handling
-
-Benefits:
-
-- Helps reviewers quickly understand the purpose of the PR
-- Improves PR documentation
+- Improve code quality through automated suggestions
+- Detect potential bugs and security vulnerabilities early
+- Reduce manual review effort for developers and reviewers
+- Improve PR readability with automatic summaries
+- Ensure adherence to coding standards and best practices
+- Accelerate pull request review cycles
 
 ---
 
-2. Automated Code Review
+AI Capabilities Available for Developers
 
-Command:
+1. Automated Code Review Suggestions
 
-/review
+AI analyzes code changes in a Pull Request and provides recommendations to improve the implementation.
 
-Purpose:
+Examples
 
-Performs an automated AI-based code review of the Pull Request.
+- Refactoring suggestions
+- Optimization recommendations
+- Removal of redundant code
+- Use of standard libraries instead of custom implementations
 
-PR-Agent checks for:
-
-- Code smells
-- Bugs
-- Security issues
-- Maintainability concerns
-- Best practice violations
-
-Example Feedback:
-
-Issue Detected: Possible SQL Injection
-
-User input 'clientId' is concatenated directly into SQL query.
-
-Recommendation:
-Use PreparedStatement instead of string concatenation.
-
-Benefits:
-
-- Early detection of potential issues
-- Faster manual code reviews
+Benefit
+Developers receive immediate feedback before reviewers start manual reviews.
 
 ---
 
-3. Code Improvement Suggestions
+2. Pull Request Summary Generation
 
-Command:
+AI automatically generates a concise summary explaining the purpose and impact of the Pull Request.
 
-/improve
+Example Summary
 
-Purpose:
+This PR introduces a caching mechanism for the product API to improve performance.
+The update integrates Redis caching and updates the API service to handle cache invalidation.
 
-Provides recommendations for improving the code structure and implementation.
-
-Example Suggestions:
-
-Suggestion:
-Replace manual iteration loop with Java Streams for better readability.
-
-Current Code:
-for(int i=0;i<list.size();i++)
-
-Suggested Code:
-list.stream()
-
-Benefits:
-
-- Promotes clean code practices
-- Improves readability and maintainability
+Benefit
+Helps reviewers quickly understand the scope of the changes.
 
 ---
 
-4. Ask Questions About the PR
+3. Code Explanation for Reviewers
 
-Command:
+AI provides detailed explanations of complex code blocks or logic changes.
 
-/ask <question>
+Example
 
-Example:
+This function validates the user authentication token and checks the token expiry 
+before allowing access to protected APIs.
 
-/ask why was the client strategy logic changed?
-
-Purpose:
-
-Allows developers and reviewers to ask questions about the Pull Request.
-PR-Agent analyzes the PR and provides context-aware answers.
-
-Example Response:
-
-The change introduces dynamic client strategy resolution based on job parameters instead of static configuration.
-
-Benefits:
-
-- Helps understand complex PRs
-- Useful for onboarding developers
+Benefit
+Improves collaboration between developers and reviewers.
 
 ---
 
-5. Generate Unit Test Suggestions
+4. Bug Detection
 
-Command:
+AI can detect potential runtime or logical errors in the Pull Request.
 
-/generate_tests
+Examples
 
-Purpose:
-
-PR-Agent suggests possible unit tests based on the changes in the Pull Request.
-
-Example Output:
-
-Suggested Test Cases
-
-1. Validate clientId mapping to correct strategy
-2. Verify exception when strategy is not found
-3. Validate SQL query execution logic
-
-Benefits:
-
-- Improves test coverage
-- Helps developers quickly create tests
+- Possible null pointer exceptions
+- Missing error handling
+- Incorrect conditional statements
+- Edge case handling
 
 ---
 
-6. Security Issue Detection
+5. Security Vulnerability Detection
 
-PR-Agent automatically scans PRs for potential security vulnerabilities.
+AI automatically scans Pull Request code for common security vulnerabilities.
 
-Examples of detected issues:
+Examples
 
-- SQL Injection
 - Hardcoded credentials
-- Unsafe input handling
-- Insecure logging
+- SQL injection risks
+- Insecure API usage
+- Sensitive data exposure
 
-Example Warning:
-
-Security Warning
-
-User input 'clientId' is used in SQL query without sanitization.
-This could lead to SQL Injection vulnerabilities.
-
-Benefits:
-
-- Enables shift-left security
-- Detects vulnerabilities early in development
+Benefit
+Improves application security before code is merged.
 
 ---
 
-7. Pull Request Size Analysis
+6. Test Case Recommendations
 
-PR-Agent evaluates the size and complexity of a Pull Request.
+AI suggests additional test cases that developers should include.
 
-Example Output:
+Examples
 
-PR Size Warning
-
-This Pull Request modifies 25 files and 1200 lines of code.
-
-Recommendation:
-Consider splitting into smaller PRs for easier review.
-
-Benefits:
-
-- Improves review efficiency
-- Encourages smaller, manageable PRs
+- Edge case scenarios
+- Boundary testing
+- Negative test cases
+- Missing unit tests
 
 ---
 
-8. Documentation Suggestions
+7. Code Style and Best Practice Enforcement
 
-PR-Agent may suggest improvements to documentation.
+AI evaluates whether the Pull Request follows coding standards defined by the team.
 
-Example Feedback:
+Examples
 
-Suggestion:
-Method clientInfo lacks documentation.
-Consider adding JavaDoc comments.
-
-Benefits:
-
-- Improves maintainability
-- Helps new developers understand code faster
+- Naming conventions
+- Function complexity
+- Code modularization
+- Removal of unused variables
 
 ---
 
-9. Pull Request Title and Description Improvement
+8. Performance Optimization Suggestions
 
-PR-Agent can suggest better titles and descriptions.
+AI analyzes the code for potential performance issues.
 
-Example:
+Examples
 
-Current Title:
-
-update config
-
-Suggested Title:
-
-Add dynamic client strategy resolution in ClientInfoConfig
-
-Benefits:
-
-- Improves repository history
-- Helps with release documentation
+- Inefficient loops
+- Unoptimized database queries
+- Repeated API calls
+- Memory inefficiencies
 
 ---
 
-10. Risk Analysis of Code Changes
+9. Dependency and Library Analysis
 
-PR-Agent analyzes the Pull Request and assigns a risk level.
+AI checks whether the Pull Request introduces dependencies that may cause issues.
 
-Example:
+Examples
 
-Risk Level: Medium
-
-Reason:
-• Core configuration class modified
-• SQL query logic updated
-
-Benefits:
-
-- Helps reviewers prioritize high-risk changes
-- Improves deployment safety
+- Outdated libraries
+- Security vulnerabilities in dependencies
+- Unnecessary dependencies
 
 ---
 
-Recommended Developer Workflow
+10. Documentation Suggestions
 
-1. Developer raises Pull Request
-2. PR-Agent automatically analyzes the PR
-3. Developer runs /review command
-4. PR-Agent provides feedback
-5. Developer fixes issues
-6. PR becomes ready for manual review
+AI identifies areas where documentation should be added or improved.
 
----
+Examples
 
-Best Practices for Using PR-Agent
-
-- Run "/review" before requesting manual review
-- Address security warnings immediately
-- Use "/describe" to improve PR documentation
-- Keep PRs small and focused
-- Add unit tests based on "/generate_tests" suggestions
+- Missing code comments
+- Missing API documentation
+- README updates
 
 ---
 
-Support
+11. Pull Request Size and Complexity Analysis
 
-If PR-Agent commands are not responding or if you encounter issues, contact the DevOps team.
+AI evaluates whether the Pull Request is too large or complex.
 
-DevOps Team Support Channel: #devops-supportIf you want, I can also help you create a much more professional Confluence page used in enterprise teams that includes:
+Suggestions
 
-architecture diagram
+- Split the PR into smaller components
+- Separate refactoring changes from feature updates
 
-PR workflow diagram
+---
 
-screenshots of PR-Agent comments
+12. Change Impact Analysis
 
-developer onboarding section.
+AI identifies components that may be impacted by the code changes.
+
+Example
+
+Changes in the authentication module may affect the login API and token validation services.
+
+---
+
+13. Inline Review Comments
+
+AI can provide line-by-line feedback directly inside the Pull Request.
+
+Example Comment
+
+Line 54:
+This method does not handle exceptions. Consider adding error handling to avoid runtime failures.
+
+---
+
+14. Infrastructure and CI/CD Awareness
+
+AI can also review infrastructure and DevOps related changes.
+
+Examples
+
+- Kubernetes YAML validation
+- Terraform configuration checks
+- CI/CD pipeline configuration errors
+- Security configuration validation
+
+---
+
+Typical Developer Workflow
+
+1. Developer creates a Pull Request in Bitbucket.
+2. AI review assistant automatically analyzes the PR.
+3. AI generates:
+   - PR summary
+   - Code improvement suggestions
+   - Security warnings
+   - Performance recommendations
+4. Developers review AI suggestions and update the code if necessary.
+5. Human reviewers perform the final code review.
+6. PR is approved and merged.
+
+---
+
+Benefits for Development Teams
+
+Benefit| Description
+Faster PR Reviews| Reduces manual effort for reviewers
+Improved Code Quality| Early detection of issues
+Security Improvements| Identifies vulnerabilities before merge
+Better Documentation| Automatic summaries and explanations
+Developer Productivity| Developers receive instant feedback
+
+---
+
+Best Practices for Developers
+
+- Review AI suggestions before requesting PR approval.
+- Use AI feedback to improve test coverage.
+- Ensure security warnings are addressed.
+- Use PR summaries to improve collaboration with reviewers.
+- Keep Pull Requests small and focused.
+
+---
+
+Conclusion
+
+Integrating AI-powered review assistants into Bitbucket Pull Request workflows significantly improves development efficiency and code quality. By leveraging automated analysis, developers can catch issues early, reduce manual review effort, and maintain consistent coding standards across teams.
+---
+
+If you want, I can also help you create two additional sections that make this document look even more professional for DevOps teams:
+
+1. PR-Agent Commands Developers Can Use in Bitbucket
+
+
+2. Architecture Diagram for AI PR Review Integration
+
+
+
+These make the Confluence page look like a proper engineering implementation document.
