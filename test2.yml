@@ -1,1 +1,306 @@
 
+PR-Agent Usage Guide for Developers (Bitbucket)
+
+Overview
+
+PR-Agent is an AI-powered tool integrated with Bitbucket Pull Requests to assist developers with automated code review, PR summarization, security analysis, and code improvement suggestions.
+
+This tool helps developers receive instant feedback on Pull Requests (PRs) before manual review, improving code quality and reducing review time.
+
+This page explains how developers can use PR-Agent commands after creating a Pull Request.
+
+---
+
+When to Use PR-Agent
+
+After raising a Pull Request in Bitbucket, developers can interact with PR-Agent through PR comments.
+
+PR-Agent analyzes the PR and provides insights such as:
+
+- Code review suggestions
+- Security vulnerability detection
+- Code improvement recommendations
+- PR summaries
+- Test generation suggestions
+
+---
+
+Available PR-Agent Commands
+
+1. Generate PR Summary
+
+Command:
+
+/describe
+
+Purpose:
+
+Generates a clear summary of the Pull Request including:
+
+- Description of code changes
+- List of impacted files
+- Functional impact of the changes
+
+Example Output:
+
+PR Summary
+• Added new client strategy mapping logic
+• Updated ClientInfoConfig to dynamically fetch strategy based on clientId
+• Refactored SQL query handling
+
+Benefits:
+
+- Helps reviewers quickly understand the purpose of the PR
+- Improves PR documentation
+
+---
+
+2. Automated Code Review
+
+Command:
+
+/review
+
+Purpose:
+
+Performs an automated AI-based code review of the Pull Request.
+
+PR-Agent checks for:
+
+- Code smells
+- Bugs
+- Security issues
+- Maintainability concerns
+- Best practice violations
+
+Example Feedback:
+
+Issue Detected: Possible SQL Injection
+
+User input 'clientId' is concatenated directly into SQL query.
+
+Recommendation:
+Use PreparedStatement instead of string concatenation.
+
+Benefits:
+
+- Early detection of potential issues
+- Faster manual code reviews
+
+---
+
+3. Code Improvement Suggestions
+
+Command:
+
+/improve
+
+Purpose:
+
+Provides recommendations for improving the code structure and implementation.
+
+Example Suggestions:
+
+Suggestion:
+Replace manual iteration loop with Java Streams for better readability.
+
+Current Code:
+for(int i=0;i<list.size();i++)
+
+Suggested Code:
+list.stream()
+
+Benefits:
+
+- Promotes clean code practices
+- Improves readability and maintainability
+
+---
+
+4. Ask Questions About the PR
+
+Command:
+
+/ask <question>
+
+Example:
+
+/ask why was the client strategy logic changed?
+
+Purpose:
+
+Allows developers and reviewers to ask questions about the Pull Request.
+PR-Agent analyzes the PR and provides context-aware answers.
+
+Example Response:
+
+The change introduces dynamic client strategy resolution based on job parameters instead of static configuration.
+
+Benefits:
+
+- Helps understand complex PRs
+- Useful for onboarding developers
+
+---
+
+5. Generate Unit Test Suggestions
+
+Command:
+
+/generate_tests
+
+Purpose:
+
+PR-Agent suggests possible unit tests based on the changes in the Pull Request.
+
+Example Output:
+
+Suggested Test Cases
+
+1. Validate clientId mapping to correct strategy
+2. Verify exception when strategy is not found
+3. Validate SQL query execution logic
+
+Benefits:
+
+- Improves test coverage
+- Helps developers quickly create tests
+
+---
+
+6. Security Issue Detection
+
+PR-Agent automatically scans PRs for potential security vulnerabilities.
+
+Examples of detected issues:
+
+- SQL Injection
+- Hardcoded credentials
+- Unsafe input handling
+- Insecure logging
+
+Example Warning:
+
+Security Warning
+
+User input 'clientId' is used in SQL query without sanitization.
+This could lead to SQL Injection vulnerabilities.
+
+Benefits:
+
+- Enables shift-left security
+- Detects vulnerabilities early in development
+
+---
+
+7. Pull Request Size Analysis
+
+PR-Agent evaluates the size and complexity of a Pull Request.
+
+Example Output:
+
+PR Size Warning
+
+This Pull Request modifies 25 files and 1200 lines of code.
+
+Recommendation:
+Consider splitting into smaller PRs for easier review.
+
+Benefits:
+
+- Improves review efficiency
+- Encourages smaller, manageable PRs
+
+---
+
+8. Documentation Suggestions
+
+PR-Agent may suggest improvements to documentation.
+
+Example Feedback:
+
+Suggestion:
+Method clientInfo lacks documentation.
+Consider adding JavaDoc comments.
+
+Benefits:
+
+- Improves maintainability
+- Helps new developers understand code faster
+
+---
+
+9. Pull Request Title and Description Improvement
+
+PR-Agent can suggest better titles and descriptions.
+
+Example:
+
+Current Title:
+
+update config
+
+Suggested Title:
+
+Add dynamic client strategy resolution in ClientInfoConfig
+
+Benefits:
+
+- Improves repository history
+- Helps with release documentation
+
+---
+
+10. Risk Analysis of Code Changes
+
+PR-Agent analyzes the Pull Request and assigns a risk level.
+
+Example:
+
+Risk Level: Medium
+
+Reason:
+• Core configuration class modified
+• SQL query logic updated
+
+Benefits:
+
+- Helps reviewers prioritize high-risk changes
+- Improves deployment safety
+
+---
+
+Recommended Developer Workflow
+
+1. Developer raises Pull Request
+2. PR-Agent automatically analyzes the PR
+3. Developer runs /review command
+4. PR-Agent provides feedback
+5. Developer fixes issues
+6. PR becomes ready for manual review
+
+---
+
+Best Practices for Using PR-Agent
+
+- Run "/review" before requesting manual review
+- Address security warnings immediately
+- Use "/describe" to improve PR documentation
+- Keep PRs small and focused
+- Add unit tests based on "/generate_tests" suggestions
+
+---
+
+Support
+
+If PR-Agent commands are not responding or if you encounter issues, contact the DevOps team.
+
+DevOps Team Support Channel: #devops-supportIf you want, I can also help you create a much more professional Confluence page used in enterprise teams that includes:
+
+architecture diagram
+
+PR workflow diagram
+
+screenshots of PR-Agent comments
+
+developer onboarding section.
