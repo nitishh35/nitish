@@ -1,519 +1,329 @@
-Perfect 👍
-Below is a Confluence-ready SOP followed by a clear execution checklist.
-This is written so that a new joiner or backup engineer can perform the entire decommissioning independently, even if you are on leave.
-
-You can copy–paste this directly into Confluence.
-
-
----
-
-📘 SOP: Application Decommissioning – PCF / Jenkins / UCD / DevOps Tools
-
-
----
-
-1. Purpose
-
-This SOP describes the end-to-end process to safely decommission an application across all DevOps platforms, including PCF, Jenkins, CloudBees CD (UCD), Sonar, Infosec, and source code repositories.
-
-This document ensures:
-
-No orphaned resources remain
-
-Production risk is minimized
-
-Compliance and audit requirements are met
-
-Any engineer can execute the steps without prior context
-
-
-
----
-
-2. Scope
-
-This SOP applies to:
-
-Single-module applications
-
-Multi-module applications
-
-Microservices
-
-Batch applications deployed on PCF
-
-
-
----
-
-3. Responsibility Matrix
-
-Role	Responsibility
-
-App Owner	Provides approval for decommission
-Sphere / Dev Lead	Confirms app/module to be decommissioned
-DSE DevOps Team	Technical guidance & validation
-PCF Ops Team	PCF app, job, task & route removal
-Enterprise DevOps	UCD & CloudBees CD cleanup
-Infosec Team	Security system cleanup
-
-
-
----
-
-4. Preconditions (Must Be Completed Before Starting)
-
-✔ App owner approval email available
-
-✔ Confirmation of environments (Dev / Prod)
-
-✔ Confirmation if app is single-module or multi-module
-
-✔ Change Request raised for Production (if applicable)
-
-
-
----
-
-5. Step-by-Step Decommissioning Procedure
-
-
----
-
-Step 1: Remove PCF Application / Job / Task
-
-Applicability
-
-All PCF-deployed applications
-
-Mandatory for both Dev and Prod
-
-
-Actions
-
-1. Identify:
-
-App name
-
-Job name (for batch apps)
-
-Task name (for batch apps)
-
-Environments (Dev & Prod)
-
-
-
-2. Send email to pcf.appops@syf.com with:
-
-App name
-
-Job/task details
-
-Environment details
-
-App owner approval attached
-
-
-
-3. After confirmation:
-
-Verify the app is removed from PCF
-
-Verify routes are unbound and removed
-
-Check Routes section (left-hand panel) in PCF UI
-
-
-
-
-Validation
-
-✔ App not visible in PCF
-✔ Job/Task removed (if batch app)
-✔ Route unbound and deleted
-
-
----
-
-Step 2: Decommission PCF Route / GTM
-
-
----
-
-DEV Environment
-
-1. Send email to pcf.appops@syf.com with:
-
-App name
-
-Foundation details
-
-Route type (PCF route)
-
-
-
-
-✔ No change ticket required for Dev
-
-
----
-
-PROD Environment
-
-1. Raise Change Request with:
-
-App owner approval attached
-
-GTM / PCF route removal details
-
-
-
-2. Reference sample change:
-
-CHG0861248
-
-
-
-3. After ticket approval:
-
-Notify PCF Ops team via email
-
-
-
-
-Validation
-
-✔ Route removed from PCF
-✔ GTM entry decommissioned
-
-
----
-
-Step 3: Jenkins Job Decommission
-
-
----
-
-Single Module Application
-
-1. Move Jenkins job to ARCHIVE location:
-
-
-
-Paths
-
-Dev: DSE-MICROSERVICES-DEV > ARCHIVE > TO_BE_DELETED
-
-Prod: DSE-MICROSERVICES-PROD > ARCHIVE > TO_BE_DELETED
-
-
-✔ Job is no longer active
-
-
----
-
-Multi-Module Application
-
-1. Open Jenkins job
-
-
-2. Click Configure
-
-
-3. Remove decommissioned module from Deployable Modules
-
-
-4. Save configuration
-
-
-
-✔ Remaining modules still deploy correctly
-
-
----
-
-Step 4: Remove UDeploy (UCD) Configuration
-
-
----
-
-Actions
-
-1. Raise RITM to DevOpsSupport@syf.com
-
-
-2. Provide:
-
-App name
-
-Component(s)
-
-Processes (Blue/Green/Rollback)
-
-Environment(s)
-
-Justification
-
-App owner approval attached
-
-
-
-
-Reference RITMs
-
-RITM2568465
-
-RITM2576827
-
-
-Validation
-
-✔ Components removed
-✔ App processes removed
-✔ No environment bindings remain
-
-
----
-
-Step 5: Infosec Application Removal
-
-
----
-
-Actions
-
-1. Raise RITM to Infosec App Team using Infosec portal
-
-
-2. Provide one of the following:
-
-Change Request number (PCF decommission), OR
-
-Jira story number (created by app team)
-
-
-
-
-Reference RITM
-
-RITM2577273
-
-
-Validation
-
-✔ App removed from Infosec systems
-
-
----
-
-Step 6: SonarQube Application Removal
-
-
----
-
-Actions
-
-1. Remove project from SonarQube
-
-
-2. Ensure no scheduled scans remain
-
-
-
-Validation
-
-✔ Sonar project no longer exists
-✔ No pipelines reference Sonar project
-
-
----
-
-Step 7: CloudBees CD Self-Service Decommission
-
-
----
-
-Actions
-
-1. Raise RITM to DevOpsSupport@syf.com
-
-
-2. Include:
-
-Microservice name
-
-Justification
-
-App owner approval
-
-
-
-
-Reference RITMs
-
-RITM2568465
-
-RITM2576827
-
-
-Validation
-
-✔ Self-service deployment disabled
-✔ App not visible in CloudBees CD
-
-
----
-
-Step 8: Source Code Repository Cleanup
-
-
----
-
-Single Module Repository
-
-1. Open repository
-
-
-2. Go to Repository Settings
-
-
-3. Scroll to Repository Details
-
-
-4. Click Archive
-
-
-
-⚠ Delete repository only after written app owner approval
-
-✔ Repo archived or deleted
-
-
----
-
-Multi-Module Repository
-
-1. Remove code related to decommissioned module
-
-
-2. Ensure:
-
-Build files updated
-
-CI pipelines updated
-
-No references to removed module
-
-
-
-
-✔ Remaining modules build successfully
-
-
----
-
-✅ FINAL DECOMMISSION CHECKLIST
-
-Use this checklist before closing the ticket.
-
-
----
-
-PCF
-
-⬜ App removed (Dev)
-
-⬜ App removed (Prod)
-
-⬜ Job removed (Batch apps)
-
-⬜ Task removed (Batch apps)
-
-⬜ Routes removed
-
-
-
----
-
-Routing / GTM
-
-⬜ Dev route removed
-
-⬜ Prod GTM removed
-
-⬜ Change Request approved
-
-
-
----
-
-Jenkins
-
-⬜ Job archived (single module)
-
-⬜ Module removed from job (multi-module)
-
-
-
----
-
-UCD / CloudBees
-
-⬜ Components removed
-
-⬜ App processes removed
-
-⬜ Self-service deployment disabled
-
-
-
----
-
-Security & Quality
-
-⬜ Infosec entry removed
-
-⬜ Sonar project removed
-
-
-
----
-
-Source Code
-
-⬜ Repo archived or deleted (single module)
-
-⬜ Module removed from repo (multi-module)
-
-⬜ Pipelines updated
-
-
-
----
-
-Final Validation
-
-⬜ No active pipelines
-
-⬜ No production endpoints
-
-⬜ All approvals attached
-
-⬜ Tickets updated & closed
-
-
-
----
-
-If you want, I can also:
-
-Add flow diagrams
-
-Create a one-page quick reference
-
-Convert this into a runbook + troubleshooting section
-
-Align it with audit / compliance language
-
-
-Just say the word 👍
+def call(def jdkTool = null, def fortifyAppName, def gitProjectKey, def gitRepositoryName, def gitPullRequestId, def fortifyVersion, def gitBranch) {
+
+    loadEnvironmentProperties()
+    def envProperty
+
+    jdkTool = jdkTool ?: envProperty.default_jdk
+    def jdkVersion = jdkTool
+
+    def mavenTool = envProperty.maven_tool
+    def gradleTool = envProperty.gradle_tool
+    def nexusRepoGroupUrl = envProperty.nexus_repo_group_url
+    def nexusRepoCredential = envProperty.nexus_repo_auth_credential_id
+    def fortifyScancentralURL = envProperty.fortify_scancentral_url
+    def fortifyApiURL = envProperty.fortify_api_url
+    def fortifyWebURL = envProperty.fortify_web_url
+    def fortifyApiToken = envProperty.fortify_api_credential_id
+    def fortifyUploadToken = envProperty.fortify_upload_credential_id
+    def fortifyScancentralExecutablePath = envProperty.fortify_scancentral_path_current
+    def fortifyTimeout = envProperty.fortify_timeout as Integer
+    def fortifyTimeoutUnits = envProperty.fortify_timeout_units
+
+    println "INFO: Fortify scan timeout value and units: ${fortifyTimeout}-${fortifyTimeoutUnits}"
+
+    // --- Engine version upgrade check ---
+    if (env.pipelineEnv.equals('prod') && (env.fortifyEngineUpgradeFlag.equalsIgnoreCase('yes'))) {
+        println "INFO: Fortify scan engine new version selected: ${env.fortifyEngineUpgradeFlag}"
+        fortifyScancentralExecutablePath = envProperty.fortify_scancentral_path_new
+    }
+    println "INFO: Fortify scancentral executable path selected: ${fortifyScancentralExecutablePath}"
+
+    // --- Engine version downgrade guard ---
+    def fortifyScanId = getFortifyProjectScanId(fortifyApiToken, fortifyApiURL, fortifyAppName, fortifyVersion)
+    def fortifyArtifactId = getFortifyArtifactId(fortifyApiToken, fortifyApiURL, fortifyScanId)
+
+    if (fortifyArtifactId != null) {
+        def lastBuildEngineVersion = getLastBuildUsedEngineVersion(fortifyApiToken, fortifyApiURL, fortifyArtifactId)
+        if (lastBuildEngineVersion != null) {
+            def fortifyVersionSelected = getFortifyVersionFromExecutablePath(fortifyScancentralExecutablePath)
+            if (fortifyVersionSelected < lastBuildEngineVersion) {
+                buildFailed("The previous Fortify scan was performed using a newer Fortify engine version ${lastBuildEngineVersion} " +
+                    "and reverting to an older version ${fortifyVersionSelected} is not allowed. Please select the newer Fortify engine version to proceed.")
+            }
+        }
+    }
+
+    // --- Run Fortify scan with timeout (non-aborting) ---
+    def fortifyTimedOut = false
+
+    try {
+        timeout(time: fortifyTimeout, unit: fortifyTimeoutUnits) {
+
+            withEnv([
+                "JAVA_HOME=${tool jdkVersion}",
+                "PATH+JAVA=${tool jdkVersion}/bin",
+                "PATH+MAVEN=${tool jdkVersion}/bin:${tool mavenTool}/bin",
+                "PATH+GRADLE=${tool jdkVersion}/bin:${tool gradleTool}/bin"
+            ]) {
+                withCredentials([
+                    usernamePassword(credentialsId: nexusRepoCredential, usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD'),
+                    string(credentialsId: fortifyUploadToken, variable: 'credentials')
+                ]) {
+                    def fortifyScanOptions = getFortifyScanOptions(nexusRepoGroupUrl, nexusRepoCredential, gitRepositoryName, fortifyUploadToken)
+                    def fortifyScanCommand = "${fortifyScancentralExecutablePath} -url ${fortifyScancentralURL} start -bt ${fortifyScanOptions} upload -uptoken \${credentials}"
+
+                    sh "${fortifyScanCommand}"
+                }
+            }
+        }
+
+    } catch (org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e) {
+        // Timeout reached — do NOT abort pipeline, just flag it
+        fortifyTimedOut = true
+        println "WARN: Fortify scan timed out after ${fortifyTimeout} ${fortifyTimeoutUnits}. Pipeline will continue."
+
+    } catch (Exception e) {
+        fortifyTimedOut = true
+        println "WARN: Fortify scan encountered an unexpected error: ${e.message}. Pipeline will continue."
+    }
+
+    // --- Send InfoSec alert if scan timed out ---
+    if (fortifyTimedOut) {
+        def alertMessage = """{
+            "text": "⚠️ *Fortify Scan Timeout Alert*\\nJob: ${env.BUILD_URL}\\nApp: ${fortifyAppName}\\nVersion: ${fortifyVersion}\\nThe Fortify scan exceeded the ${fortifyTimeout} ${fortifyTimeoutUnits} threshold and was skipped. Please review manually.\\nFortify Report: ${fortifyWebURL}/ssc/version/${fortifyScanId}/audit"
+        }"""
+
+        // Send to InfoSec webhook (set INFOSEC_WEBHOOK_URL as Jenkins env var or credential)
+        try {
+            sh """curl -s -X POST -H 'Content-Type: application/json' \
+                -d '${alertMessage}' \
+                '${env.INFOSEC_WEBHOOK_URL}'"""
+            println "INFO: InfoSec alert sent successfully."
+        } catch (Exception alertEx) {
+            println "WARN: Failed to send InfoSec alert: ${alertEx.message}"
+        }
+
+        // Also post to Bitbucket PR if applicable
+        if (gitPullRequestId != 'NA') {
+            postBitbucketPrComment(gitProjectKey, gitRepositoryName, gitPullRequestId, alertMessage)
+        }
+
+        println "INFO: Fortify scan timed out. Skipping issue evaluation and continuing pipeline."
+        return
+    }
+
+    // --- Post-scan: retrieve and evaluate issues ---
+    def issuesResponseContent = getIssuesResponse(fortifyApiToken, fortifyApiURL, fortifyScanId)
+
+    def fortifyResultStr = ''
+
+    if (issuesResponseContent.count > 0) {
+        fortifyResultStr = "Fortify Issues Summary: \n\n CATEGORY | CRITICALITY | DEVELOPER STATUS | FILENAME \n\n"
+        issuesResponseContent.data.each { key, value ->
+            if ((key.friority).startsWith('Critical') || (key.friority).startsWith('High')) {
+                if ((key.primaryTag).equals(null) || key.primaryTag == null || (key.primaryTag).toString() == 'null') {
+                    fortifyResultStr += key.issueName + " | " + key.friority + " | NA | " + key.fullFileName + " \n"
+                } else {
+                    fortifyResultStr += key.issueName + " | " + key.friority + " | " + key.primaryTag + " | " + key.fullFileName + " \n"
+                }
+            }
+        }
+    } else {
+        fortifyResultStr = 'No issues were identified during the Fortify scan.'
+    }
+
+    def reportLink = "View Fortify report at ${fortifyWebURL}/ssc/version/${fortifyScanId}/audit"
+    println "INFO: The Fortify report link: ${reportLink}"
+
+    if (gitPullRequestId != 'NA') {
+        def jenkinsJobURL = "Jenkins Job: " + env.BUILD_URL
+        def fortifyResultText = """{"text": "${jenkinsJobURL} \n\n ${reportLink} \n\n ${fortifyResultStr}"}"""
+        postBitbucketPrComment(gitProjectKey, gitRepositoryName, gitPullRequestId, fortifyResultText)
+    } else {
+        println "INFO: The Fortify result value: ${fortifyResultStr}"
+    }
+
+    // --- Determine build pass/fail ---
+    def (issuesResponseGroupCritical, issuesResponseGroupHigh) = getFortifyIssuesByGroup(fortifyApiToken, fortifyApiURL, fortifyScanId)
+
+    def failBuild = false
+    if (issuesResponseGroupCritical > 0 || issuesResponseGroupHigh > 0) {
+        failBuild = true
+    }
+
+    def fortifySkip = checkForFortifySkip(fortifyVersion, gitRepositoryName)
+
+    if (fortifySkip.equalsIgnoreCase('N')) {
+        if (issuesResponseContent.data != null) {
+            if (issuesResponseContent.count > 0) {
+                issuesResponseContent.data.each { key, value ->
+                    // Fail if Critical/High AND:
+                    //   - Running in PROD and failBuild is true, OR
+                    //   - Running in DEV and no exception is set (primaryTag is null)
+                    if (
+                        ((key.friority).startsWith('Critical') || (key.friority).startsWith('High')) &&
+                        (
+                            (fortifyVersion.equalsIgnoreCase('PROD') && failBuild) ||
+                            (fortifyVersion.equalsIgnoreCase('DEV') &&
+                                ((key.primaryTag).equals(null) || key.primaryTag == null || (key.primaryTag).toString() == 'null'))
+                        )
+                    ) {
+                        buildFailed("Vulnerabilities have been identified by the Fortify scan.\n" +
+                            "Action Required: Please review the details in the analysis report using the link provided and address the reported issues.\n" +
+                            "Fortify Report: ${reportLink}")
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ─── Helper Functions ────────────────────────────────────────────────────────
+
+def getFortifyProjectScanId(def fortifyApiToken, def fortifyApiURL, def fortifyAppName, def fortifyVersion) {
+    withCredentials([string(credentialsId: fortifyApiToken, variable: 'credentials')]) {
+
+        def projectResponse = sh(
+            script: "curl -ksH 'Authorization: FortifyToken \${credentials}' '${fortifyApiURL}/projects?q=name:${fortifyAppName}'",
+            returnStdout: true
+        ).trim()
+
+        def projectData = readJSON text: projectResponse
+        if (projectData.responseCode != 200) {
+            buildFailed("Failed to retrieve Fortify project id: ${projectData}")
+        }
+
+        def fortifyProjectId = projectData.data[0].id
+        println "INFO: Fortify project id for this app: ${fortifyProjectId}"
+
+        def scanResponse = sh(
+            script: "curl -ksH 'Authorization: FortifyToken \${credentials}' '${fortifyApiURL}/projects/${fortifyProjectId}/versions?q=name:${fortifyVersion}'",
+            returnStdout: true
+        ).trim()
+
+        def scanData = readJSON text: scanResponse
+        if (scanData.responseCode != 200) {
+            buildFailed("Failed to retrieve Fortify scan id: ${scanData}")
+        }
+
+        def fortifyScanId = scanData.data[0].id
+        println "INFO: Fortify scan id for this analysis: ${fortifyScanId}"
+        return fortifyScanId
+    }
+}
+
+def getFortifyArtifactId(def fortifyApiToken, def fortifyApiURL, def fortifyScanId) {
+    withCredentials([string(credentialsId: fortifyApiToken, variable: 'credentials')]) {
+
+        def artifactsResponse = sh(
+            script: "curl -ksH 'Authorization: FortifyToken \${credentials}' '${fortifyApiURL}/projectVersions/${fortifyScanId}/artifacts'",
+            returnStdout: true
+        ).trim()
+
+        def artifactsData = readJSON text: artifactsResponse
+        def fortifyArtifactId = null
+
+        if (artifactsData.responseCode != 200) {
+            buildFailed("Failed to retrieve Fortify artifacts details: ${artifactsData}")
+        }
+
+        if (artifactsData.data && artifactsData.data.size() > 0) {
+            fortifyArtifactId = artifactsData.data[0].id
+        } else {
+            println "WARN: No artifacts were found for specified Fortify scan id: ${fortifyScanId}"
+        }
+
+        println "INFO: Fortify artifact id for this analysis: ${fortifyArtifactId}"
+        return fortifyArtifactId
+    }
+}
+
+def getLastBuildUsedEngineVersion(def fortifyApiToken, def fortifyApiURL, def fortifyArtifactId) {
+    withCredentials([string(credentialsId: fortifyApiToken, variable: 'credentials')]) {
+
+        def artifactResponse = sh(
+            script: "curl -ksH 'Authorization: FortifyToken \${credentials}' '${fortifyApiURL}/artifacts/${fortifyArtifactId}/scans'",
+            returnStdout: true
+        ).trim()
+
+        def artifactScanData = readJSON text: artifactResponse
+        def extractedLastBuildUsedEngineVersion = null
+
+        if (artifactScanData.responseCode != 200) {
+            buildFailed("Failed to retrieve Fortify artifact scan data: ${artifactScanData}")
+        }
+
+        if (artifactScanData.data && artifactScanData.data.size() > 0) {
+            extractedLastBuildUsedEngineVersion = "${artifactScanData.data[0].engineVersion.tokenize('.')[0]}.${artifactScanData.data[0].engineVersion.tokenize('.')[1]}" as BigDecimal
+        } else {
+            println "WARN: No artifact scans were found for specified Fortify artifact id: ${fortifyArtifactId}"
+        }
+
+        println "INFO: Fortify engine version used for previous build: ${extractedLastBuildUsedEngineVersion}"
+        return extractedLastBuildUsedEngineVersion
+    }
+}
+
+def getFortifyVersionFromExecutablePath(def fortifyScancentralExecutablePath) {
+    def selectedFortifyVersion = sh(
+        script: "${fortifyScancentralExecutablePath} -v | grep 'ScanCentral version:' | cut -d':' -f2 | cut -d. -f1,2",
+        returnStdout: true
+    ).trim() as BigDecimal
+    println "INFO: Fortify version selected for current analysis: ${selectedFortifyVersion}"
+    return selectedFortifyVersion
+}
+
+def getIssuesResponse(def fortifyApiToken, def fortifyApiURL, def fortifyScanId) {
+    withCredentials([string(credentialsId: fortifyApiToken, variable: 'credentials')]) {
+
+        def issuesResponse = sh(
+            script: "curl -ksH 'Authorization: FortifyToken \${credentials}' '${fortifyApiURL}/projectVersions/${fortifyScanId}/issues'",
+            returnStdout: true
+        ).trim()
+
+        def issuesResponseContent = readJSON text: issuesResponse
+        if (issuesResponseContent.responseCode != 200) {
+            buildFailed("Failed to retrieve scan issues from Fortify: ${issuesResponseContent}")
+        }
+
+        return issuesResponseContent
+    }
+}
+
+def getFortifyIssuesByGroup(def fortifyApiToken, def fortifyApiURL, def fortifyScanId) {
+    withCredentials([string(credentialsId: fortifyApiToken, variable: 'credentials')]) {
+
+        def issuesResponseGroup = sh(
+            script: "curl -ksH 'Authorization: FortifyToken \${credentials}' '${fortifyApiURL}/projectVersions/${fortifyScanId}/issueGroups?groupingtype=FOLDER&filterset=Security+Explorer'",
+            returnStdout: true
+        ).trim()
+
+        def issuesResponseGroupCritical = sh(
+            script: "echo '${issuesResponseGroup}' | jq -r 'if contains({data: [{id: \"Critical\"}]}) then .data[] | select(.id == \"Critical\").visibleCount else 0 end'",
+            returnStdout: true
+        ).trim() as Integer
+
+        def issuesResponseGroupHigh = sh(
+            script: "echo '${issuesResponseGroup}' | jq -r 'if contains({data: [{id: \"High\"}]}) then .data[] | select(.id == \"High\").visibleCount else 0 end'",
+            returnStdout: true
+        ).trim() as Integer
+
+        return [issuesResponseGroupCritical, issuesResponseGroupHigh]
+    }
+}
+
+def getFortifyScanOptions(def nexusRepoGroupUrl, def nexusRepoCredential, def gitRepositoryName, def fortifyUploadToken) {
+    def fortifyOptions = ''
+
+    if (getAppBuildType().equals("maven")) {
+        fortifyOptions = "mvn -bc -V -B -e"
+
+    } else if (getAppBuildType().equals("gradle")) {
+        if (fileExists('gradlew')) {
+            sh 'rm -f gradlew'
+        }
+        sh 'gradle -v'
+        fortifyOptions = "gradle -bc --init-script init.gradle " +
+            "-Dnexus_url=${nexusRepoGroupUrl} " +
+            "-Dnexus_username=\$USERNAME " +
+            "-Dnexus_password=\$PASSWORD " +
+            "-g /appbin/install/Gradle_Cache/${gitRepositoryName} " +
+            "-exclude '**/.git/**'"
+
+    } else if (getAppBuildType().equals("static")) {
+        sh 'java -version'
+        fortifyOptions = "none -exclude '**/.git/**'"
+    }
+
+    return fortifyOptions
+}
