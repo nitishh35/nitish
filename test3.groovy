@@ -343,4 +343,24 @@ Human review becomes faster
 
 ---
 
-If you're exploring PR-Agent as a DevOps platform feature, I can also show you 5 advanced PR-Agent configurations that most companies miss, such as auto-review on PR creation, risk scoring, and policy enforcement, which significantly improve developer productivity.
+If you're exploring PR-Agent as a DevOps platform feature, I can also show you 5 advanced PR-Agent configurations t
+                        hat most companies miss, such as auto-review on PR creation, risk scoring, and policy enforcement, which significantly improve developer productivity.
+
+
+public User getUser(String username) throws SQLException {
+
+    Connection conn = DriverManager.getConnection(DB_URL, USER, PASS);
+    Statement stmt = conn.createStatement();
+
+    // Vulnerable query
+    String query = "SELECT * FROM users WHERE username = '" + username + "'";
+
+    ResultSet rs = stmt.executeQuery(query);
+
+    if (rs.next()) {
+        return new User(rs.getString("username"));
+    }
+
+    return null;
+}
+                        
