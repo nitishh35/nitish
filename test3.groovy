@@ -1,366 +1,327 @@
-
-After a Pull Request (PR) is created, PR-Agent offers several features that can help developers review, understand, and improve their code faster. As a DevOps engineer, you can enable and configure these so developers can interact with the PR using simple commands in Bitbucket comments.
-
-Below are the most useful PR-Agent features after a PR is raised.
+Here is your Confluence page content formatted exactly like your screenshot style (structured sections, clean headings, step-by-step flow, ready to paste).
 
 
 ---
 
-1. PR Summary (/describe)
+AI-Assisted PR Review using PR-Agent (Bitbucket)
 
-Generates a clear explanation of what the PR does.
 
-Command developers can use:
+---
 
-/describe
+1. Objective
+
+Approximately hundreds of Pull Requests (PRs) are submitted daily across SYF Bitbucket repositories. This solution aims to:
+
+Improve the effectiveness of the code review process beyond just functional validation
+
+Reduce manual review effort for developers and reviewers
+
+Decrease overall PR review turnaround time
+
+Enhance code quality, security, and maintainability
+
+
+
+---
+
+2. Overview
+
+Refer to the overview documentation for detailed architecture and working:
+
+> Reference Link: AI-enabled PR Review Overview
+
+
+
+This solution enables developers to interact with PR-Agent, which performs automated analysis and provides intelligent recommendations on Pull Requests.
+
+
+---
+
+3. Enabling PR Assistant
+
+Accessibility: Good to go
+
+PR-Agent will be enabled at the project level (DL to finalize)
+
+Once enabled, it is automatically available for:
+
+All repositories under the project
+
+
+No additional setup required at repository level
+
+
+
+---
+
+4. PR Review for Initial Request
+
+After raising a Pull Request in Bitbucket:
+
+PR-Agent is automatically triggered
+
+No manual input or command is required initially
+
+The system posts an AI-generated review comment
+
+
+AI Review Trigger Behavior
+
+Trigger Event: PR Creation
+
+Actor: SVC-PR-AGENT
+
+Action:
+
+Analyzes code changes (diff)
+
+Generates structured review output
+
+
+
+Auto-Generated Output Includes:
+
+PR Summary
+
+Review Decision (Approve / Improve / Reject)
+
+Issues Identified
+
+Justifications
+
+
+
+---
+
+5. How to Use PR-Agent
+
+PR-Agent provides multiple capabilities that developers can invoke via PR comments.
+
+Capabilities Include:
+
+PR Summary
+
+Code Review Suggestions
+
+Code Improvement Recommendations
+
+Security Vulnerability Detection
+
+Test Case Generation
+
+Change Risk Analysis
+
+PR Size Analysis
+
+Documentation Suggestions
+
+
+
+---
+
+Step-by-Step PR-Agent Usage
+
+
+---
+
+5.1 PR Summary
+
+Purpose: Generates a clear explanation of PR changes
+
+Command:
+
+PrAgent - describe the PR changes
 
 What it provides:
 
-Summary of the code changes
+Summary of code changes
 
 List of modified files
 
-High-level description of functionality changes
+High-level functional description
 
 Impacted components
 
 
-Example output:
-
-PR Summary
-• Added new client strategy mapping logic
-• Updated ClientInfoConfig to fetch strategy dynamically
-• Refactored SQL query logic
-
-Why useful:
-
-Reviewers quickly understand the PR without reading all code.
-
-
 
 ---
 
-2. AI Code Review (/review)
+5.2 Code Review Suggestions
 
-Performs an automated code review.
+Purpose: Performs automated code review
 
 Command:
 
-/review
+PrAgent - perform code review
 
-It analyzes:
+Analyzes:
 
-code quality
+Code quality
 
-security issues
+Security issues
 
-potential bugs
+Potential bugs
 
-maintainability problems
-
-
-Example output:
-
-Issue: Possible SQL Injection
-Recommendation: Use PreparedStatement instead of string concatenation.
-
-Issue: Raw type usage for List
-Recommendation: Use generics List<ClientStrategy>
-
-Useful because:
-
-Developers get early feedback before human review.
+Maintainability concerns
 
 
 
 ---
 
-3. Code Improvement Suggestions (/improve)
+5.3 Code Improvement Suggestions
 
-Suggests better implementations or refactoring options.
+Purpose: Suggests optimized/refactored code
 
 Command:
 
-/improve
+PrAgent - suggest improvements
 
-Example output:
+Example:
 
-Suggestion:
-Replace manual loop with Java Streams for better readability.
+Replace loops with Java Streams
 
-Example improvement:
-
-From:
-
-for(int i=0;i<list.size();i++)
-
-To:
-
-list.stream()
-
-Useful for:
-
-code optimization
-
-readability
-
-modern coding practices
+Optimize logic for readability
 
 
 
 ---
 
-4. Ask Questions About the PR (/ask)
+5.4 Security Vulnerability Detection
 
-Developers can ask questions about the code changes.
+Purpose: Identifies security risks
 
-Command example:
-
-/ask why was the client strategy logic changed?
-
-PR-Agent will analyze the PR and answer.
-
-Example response:
-
-The change introduces dynamic client strategy resolution
-based on job parameters instead of static configuration.
-
-Useful for:
-
-onboarding new developers
-
-understanding large PRs
-
-
-
----
-
-5. Generate Unit Tests (/generate_tests)
-
-Automatically suggests unit tests for the PR changes.
-
-Command:
-
-/generate_tests
-
-Example output:
-
-Suggested Test Cases:
-
-1. Validate clientId mapping works correctly
-2. Verify exception when strategy not found
-3. Test SQL query generation
-
-Useful because:
-
-increases test coverage
-
-helps developers write tests faster
-
-
-
----
-
-6. Detect Security Issues
-
-PR-Agent highlights security vulnerabilities automatically.
-
-Examples it detects:
+Detects:
 
 SQL Injection
 
-insecure logging
+Hardcoded secrets
 
-hardcoded secrets
-
-unsafe deserialization
+Insecure logging
 
 
-Example output:
+Command:
 
-Security Warning:
-User input 'clientId' is used in SQL query without sanitization.
+PrAgent - check security issues
+
+
+---
+
+5.5 Test Case Generation Suggestions
+
+Purpose: Suggests unit/integration test cases
+
+Command:
+
+PrAgent - generate test cases
+
+Benefits:
+
+Improves test coverage
+
+Speeds up testing process
+
+
+
+---
+
+5.6 Change Risk Analysis
+
+Purpose: Evaluates PR risk level
+
+Command:
+
+PrAgent - provide risk analysis
+
+Example Output:
+
+Risk Level: High
 
 Useful for:
 
-DevSecOps shift-left security
+Reviewer prioritization
+
+Deployment decision-making
 
 
 
 ---
 
-7. PR Size Analysis
+5.7 PR Size Analysis
 
-PR-Agent can detect large PRs that are difficult to review.
+Purpose: Detects large PRs
 
-Example output:
+Command:
 
-PR Size Warning:
-This PR modifies 25 files and 1200 lines.
+PrAgent - evaluate PR size
 
-Recommendation:
-Split into smaller PRs for easier review.
+Example Output:
 
-Useful for:
+PR modifies 25 files and 1200 lines
+Recommendation: Split into smaller PRs
 
-better code review practices
+Benefits:
 
+Improves review efficiency
 
-
----
-
-8. Documentation Suggestions
-
-PR-Agent can suggest missing documentation or comments.
-
-Example:
-
-Suggestion:
-Method clientInfo lacks documentation.
-Consider adding JavaDoc.
-
-Useful for:
-
-maintainability
-
-onboarding new developers
+Encourages best practices
 
 
 
 ---
 
-9. PR Title and Description Improvement
+5.8 PR Documentation Suggestions
 
-PR-Agent can suggest better PR titles and descriptions.
+Purpose: Suggests missing documentation
 
-Example:
+Command:
 
-Original:
+PrAgent - provide documentation suggestions
 
-update config
+Benefits:
 
-Suggested:
+Improves maintainability
 
-Add dynamic client strategy resolution in ClientInfoConfig
-
-Useful for:
-
-clean repository history
-
-better release notes
+Ensures better knowledge sharing
 
 
 
 ---
 
-10. Change Risk Analysis
+6. Key Benefits
 
-PR-Agent evaluates risk level of the PR.
+Faster PR reviews
 
-Example output:
+Reduced manual effort
 
-Risk Level: Medium
+Improved code quality
 
-Reason:
-• Core configuration class modified
-• SQL query logic updated
+Early detection of issues
 
-Useful for:
-
-reviewers to prioritize attention.
+Standardized review process
 
 
 
 ---
 
-Most Useful Commands Developers Should Know
+7. Notes
 
-Command	Purpose
+AI recommendations are advisory, not final decisions
 
-/describe	PR summary
-/review	automated code review
-/improve	refactoring suggestions
-/ask	ask questions about PR
-/generate_tests	create unit tests
-/update_changelog	update changelog
+Developers and reviewers should validate suggestions
+
+Align recommendations with project-specific coding standards
 
 
 
 ---
 
-As a DevOps Engineer, What You Should Configure
+8. Conclusion
 
-You should explore:
-
-1. PR-Agent configuration file
-
-
-
-.pr_agent.toml
-
-Configure:
-
-review depth
-
-security analysis
-
-file filtering
-
-response format
-
-
-2. Bitbucket pipeline integration
-
-
-
-Trigger PR-Agent automatically when PR is created.
-
-3. Custom prompts
-
-
-
-Example:
-
-Focus on OWASP vulnerabilities
+PR-Agent acts as an intelligent assistant for developers, enabling faster, smarter, and more consistent Pull Request reviews by automating initial analysis and providing actionable insights.
 
 
 ---
 
-Best Workflow for Developers
-
-Developer creates PR
-        ↓
-PR-Agent auto generates summary
-        ↓
-Developer runs /review
-        ↓
-PR-Agent suggests improvements
-        ↓
-Developer fixes issues
-        ↓
-Human review becomes faster
-
-
----
-
-If you're exploring PR-Agent as a DevOps platform feature, I can also show you 5 advanced PR-Agent configurations t
-                        hat most companies miss, such as auto-review on PR creation, risk scoring, and policy enforcement, which significantly improve developer productivity.
-
-
-public User getUser(String username) throws SQLException {
-
-    Connection conn = DriverManager.getConnection(DB_URL, USER, PASS);
-    Statement stmt = conn.createStatement();
-
-    // Vulnerable query
-    String query = "SELECT * FROM users WHERE username = '" + username + "'";
-
-    ResultSet rs = stmt.executeQuery(query);
-
-    if (rs.next()) {
-        return new User(rs.getString("username"));
-    }
-
-    return null;
-}
-                        
+If you want next, I can: ✅ Convert this into Confluence macros (panels, expand sections)
+✅ Add architecture diagram (PR → Webhook → AI → Comment)
+✅ Add real PR output formatted table like your screenshot
