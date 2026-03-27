@@ -1,1 +1,26 @@
 
+whay you ahve added 4 value
+rc33 module expects explicit inputs, while your current lambda.tf is not providing them
+
+Even though some variables existed earlier:
+
+👉 In rc25:
+
+Module tolerated missing inputs
+Some behavior was implicit
+
+👉 In rc33:
+
+Module is strict
+Inputs must be explicitly provided
+
+| Area                    | rc25            | rc33                           | Impact                   |
+| ----------------------- | --------------- | ------------------------------ | ------------------------ |
+| Lambda creation         | `create`        | `create + create_function`     | ❗ Mandatory change       |
+| Publish version         | ❌ Not enforced  | `publish_lambda_version` added | Needed for alias         |
+| Ephemeral storage       | ❌ Not present   | Added                          | Optional but recommended |
+| KMS handling            | Direct          | Conditional + default fallback | Safer                    |
+| Env vars                | Same merge      | Same but stricter expectation  | Validate                 |
+| Logging                 | Already present | Same but stricter dependency   | IAM needed               |
+| Provisioned concurrency | Present         | Same but active condition      | Risk                     |
+| Tags                    | merged          | direct `var.tags`              | Minor change             |
